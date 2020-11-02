@@ -3,17 +3,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import truncnorm
 
-from utils import MeanAttention, ActionInjector, standardize_image, get_timing_signal_nd, mix, Container, bit_to_int, \
+from utils import MeanAttention, ActionInjector, standardize_frame, get_timing_signal_nd, mix, Container, bit_to_int, \
     one_hot_encode, sample_with_temperature, int_to_bit, ParameterSealer
 
 
 class RewardEstimator(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config, input_size):
         super().__init__()
         self.config = config
 
-        self.dense1 = nn.Linear(2 * self.config.hidden_size, 128)
+        self.dense1 = nn.Linear(input_size, 128)
         self.dense2 = nn.Linear(128, 3)
 
     def forward(self, x):
@@ -25,9 +25,9 @@ class RewardEstimator(nn.Module):
 
 class ValueEstimator(nn.Module):
 
-    def __init__(self, size):
+    def __init__(self, input_size):
         super().__init__()
-        self.dense = nn.Linear(size, 1)
+        self.dense = nn.Linear(input_size, 1)
 
     def forward(self, x):
         return self.dense(x)
@@ -35,17 +35,17 @@ class ValueEstimator(nn.Module):
 
 class MiddleNetwork(nn.Module):
 
-    def __init__(self, config, normalized_shape):
+    def __init__(self, config, shape):
         super().__init__()
         self.config = config
 
         self.middle_network = []
         for i in range(self.config.hidden_layers):
-            self.middle_network.append(nn.Conv2d(self.config.hidden_size, self.config.hidden_size, 3, padding=1))
+            self.middle_network.append(nn.Conv2d(shape[0], shape[0], 3, padding=1))
             if i == 0:
                 self.middle_network.append(None)
             else:
-                self.middle_network.append(nn.LayerNorm(normalized_shape))
+                self.middle_network.append(nn.LayerNorm(shape[1:]))
         self.middle_network = nn.ModuleList(self.middle_network)
 
     def forward(self, x):
@@ -103,7 +103,7 @@ class BitsPredictor(nn.Module):
 
             loss = nn.CrossEntropyLoss()(pred.permute((0, 2, 1)), target_ints)
 
-            return pred, loss
+            return pred, loss / self.config.rollout_length
 
         outputs = []
         lstm_input = first_lstm_input
@@ -122,10 +122,10 @@ class BitsPredictor(nn.Module):
 
 class StochasticModel(Container):
 
-    def __init__(self, config, input_size, n_action):
+    def __init__(self, config, layer_shape, n_action):
         super().__init__()
         self.config = config
-        channels = (self.config.stacking + 1) * self.config.frame_shape[0]
+        channels = 2 * self.config.frame_shape[0]
         filters = [128, 512]
         self.lstm_loss = None
         self.get_lstm_loss()
@@ -134,14 +134,14 @@ class StochasticModel(Container):
         self.conv1 = nn.Conv2d(self.config.hidden_size, filters[0], 8, 4, padding=2)
         self.conv2 = nn.Conv2d(filters[0], filters[1], 8, 4, padding=2)
         self.dense1 = nn.Linear(2 * 2 * channels, self.config.bottleneck_bits)
-        self.dense2 = nn.Linear(self.config.bottleneck_bits, self.config.hidden_size)
-        self.dense3 = nn.Linear(self.config.bottleneck_bits, self.config.hidden_size)
+        self.dense2 = nn.Linear(self.config.bottleneck_bits, layer_shape[0])
+        self.dense3 = nn.Linear(self.config.bottleneck_bits, layer_shape[0])
 
         self.action_injector = ActionInjector(n_action, self.config.hidden_size)
         self.mean_attentions = nn.ModuleList([MeanAttention(n_filter, 2 * channels) for n_filter in filters])
         self.bits_predictor = ParameterSealer(BitsPredictor(
             config,
-            input_size,
+            layer_shape[0] * layer_shape[1] * layer_shape[2],
             self.config.latent_state_size,
             self.config.bottleneck_bits
         ))
@@ -155,9 +155,7 @@ class StochasticModel(Container):
         return layer * z_mul + z_add
 
     def forward(self, layer, inputs, action, target, epsilon):
-        if self.training:
-            assert target is not None
-
+        if self.training and target is not None:
             x = torch.cat((inputs, target), dim=1)
             x = self.input_embedding(x)
             x = x + get_timing_signal_nd(x.shape).to(self.config.device)
@@ -209,66 +207,117 @@ class NextFramePredictor(Container):
     def __init__(self, config, n_action):
         super().__init__()
         self.config = config
+        filters = self.config.hidden_size
+
+        # Internal states
+
+        self.internal_states = None
+        self.warm = False
+        self.gate = nn.Conv2d(
+            self.config.frame_shape[0] + self.config.recurrent_state_size,
+            2 * self.config.recurrent_state_size,
+            3,
+            padding=1
+        )
 
         # Model
-        self.input_embedding = nn.Conv2d(self.config.stacking * self.config.frame_shape[0], self.config.hidden_size, 1)
+        self.input_embedding = nn.Conv2d(
+            self.config.frame_shape[0] + self.config.recurrent_state_size,
+            self.config.hidden_size,
+            1
+        )
 
         self.downscale_layers = []
         shape = list(self.config.frame_shape)
         shapes = [shape]
-        for _ in range(self.config.compress_steps):
-            self.downscale_layers.append(
-                nn.Conv2d(self.config.hidden_size, self.config.hidden_size, 4, stride=2, padding=1))
-            shape = [self.config.hidden_size, shape[1] // 2, shape[2] // 2]
+        for i in range(self.config.compress_steps):
+            in_filters = filters
+            if i < self.config.filter_double_steps:
+                filters *= 2
+
+            shape = [filters, shape[1] // 2, shape[2] // 2]
             shapes.append(shape)
+
+            self.downscale_layers.append(
+                nn.Conv2d(in_filters, filters, 4, stride=2, padding=1))
             self.downscale_layers.append(nn.LayerNorm(shape))
+
         self.downscale_layers = nn.ModuleList(self.downscale_layers)
 
         middle_shape = shape
 
         self.upscale_layers = []
-        self.action_masks = []
+        self.action_injectors = [ActionInjector(n_action, filters)]
         for i in range(self.config.compress_steps):
-            shape = [shape[0], shape[1] * 2, shape[2] * 2]
+            self.action_injectors.append(ActionInjector(n_action, filters))
+
+            in_filters = filters
+            if i >= self.config.compress_steps - self.config.filter_double_steps:
+                filters //= 2
+
+            shape = [filters, shape[1] * 2, shape[2] * 2]
             output_padding = (0 if shape[1] == shapes[-i - 2][1] else 1, 0 if shape[2] == shapes[-i - 2][2] else 1)
-            shape = [shape[0], shape[1] + output_padding[0], shape[2] + output_padding[1]]
+            shape = [filters, shape[1] + output_padding[0], shape[2] + output_padding[1]]
 
             self.upscale_layers.append(nn.ConvTranspose2d(
-                self.config.hidden_size, self.config.hidden_size, 2, stride=2, output_padding=output_padding
+                in_filters, filters, 2, stride=2, output_padding=output_padding
             ))
             self.upscale_layers.append(nn.LayerNorm(shape))
 
         self.upscale_layers = nn.ModuleList(self.upscale_layers)
+        self.action_injectors = nn.ModuleList(self.action_injectors)
 
         self.logits = nn.Conv2d(self.config.hidden_size, 256 * self.config.frame_shape[0], 1)
 
         # Sub-models
-        self.middle_network = MiddleNetwork(self.config, middle_shape[1:])
-        self.reward_estimator = ParameterSealer(RewardEstimator(self.config))
+        self.middle_network = MiddleNetwork(self.config, middle_shape)
+        self.reward_estimator = ParameterSealer(RewardEstimator(self.config, middle_shape[0] + filters))
         self.value_estimator = ParameterSealer(ValueEstimator(middle_shape[0] * middle_shape[1] * middle_shape[2]))
-        self.action_injectors = nn.ModuleList(
-            [ActionInjector(n_action, self.config.hidden_size)] * (self.config.compress_steps + 1)
-        )
-        if config.use_stochastic_model:
-            self.stochastic_model = StochasticModel(
-                self.config,
-                middle_shape[0] * middle_shape[1] * middle_shape[2],
-                n_action
-            )
+        self.stochastic_model = StochasticModel(self.config, middle_shape, n_action)
+
+    def init_internal_states(self, batch_size):
+        self.internal_states = torch.zeros(
+            (batch_size, self.config.recurrent_state_size, *self.config.frame_shape[1:])
+        ).to(self.config.device)
+
+    def update_internal_states_early(self, frames):
+        internal_state = self.internal_states.detach()
+        state_activation = torch.cat((internal_state, frames), dim=1)
+        state_gate_candidate = self.gate(state_activation)
+        state_gate, state_candidate = torch.split(state_gate_candidate, self.config.recurrent_state_size, dim=1)
+        state_gate = torch.sigmoid(state_gate)
+        state_candidate = torch.tanh(state_candidate)
+        internal_state = internal_state * state_gate
+        internal_state = internal_state + state_candidate * (1 - state_gate)
+        self.internal_states = internal_state
+
+    def warmup(self, frames, actions):
+        assert len(frames) == self.config.stacking
+        assert len(actions) == self.config.stacking - 1
+
+        batch_size = frames.shape[1]
+        self.init_internal_states(batch_size)
+        self.warm = True
+
+        loss = torch.zeros((1,)).to(frames.device)
+
+        for i in range(self.config.stacking - 1):
+            frame = frames[i]
+            action = actions[i]
+            frame_pred = self(frame, action)[0]
+            target = (frames[i + 1].detach() * 255).long()
+            loss = loss + nn.CrossEntropyLoss()(frame_pred, target)
+
+        return loss
+
+    def is_warm(self):
+        return self.warm
 
     def forward(self, x, action, target=None, epsilon=0.0):
-        y = torch.empty_like(x)
+        x_start = torch.stack([standardize_frame(frame) for frame in x])
 
-        for batch_index in range(len(x)):
-            for frame_index in range(
-                    0,
-                    self.config.stacking * self.config.frame_shape[0],
-                    self.config.frame_shape[0]
-            ):
-                frame = x[batch_index, frame_index:frame_index + self.config.frame_shape[0]]
-                y[batch_index, frame_index:frame_index + self.config.frame_shape[0]] = standardize_image(frame)
-
-        x_start = y
+        x = torch.cat((x_start, self.internal_states), dim=1)
+        self.update_internal_states_early(x_start)
 
         x = self.input_embedding(x)
         x = x + get_timing_signal_nd(x.shape).to(self.config.device)
@@ -288,10 +337,9 @@ class NextFramePredictor(Container):
 
         if target is not None:
             for batch_index in range(len(target)):
-                target[batch_index] = standardize_image(target[batch_index])
+                target[batch_index] = standardize_frame(target[batch_index])
 
-        if self.config.use_stochastic_model:
-            x = self.stochastic_model(x, x_start, action, target, epsilon)
+        x = self.stochastic_model(x, x_start, action, target, epsilon)
 
         x_mid = torch.mean(x, dim=(2, 3))
 
@@ -312,6 +360,6 @@ class NextFramePredictor(Container):
         reward_pred = self.reward_estimator(torch.cat((x_mid, x_fin), dim=1))
 
         x = self.logits(x)
-        x = x.view((-1, 256, self.config.frame_shape[0], *self.config.frame_shape[1:]))
+        x = x.view((-1, 256, *self.config.frame_shape))
 
         return x, reward_pred, value_pred

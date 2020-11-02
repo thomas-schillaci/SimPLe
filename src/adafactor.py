@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 #
 # From https://github.com/pytorch/fairseq
+# Fairseq's license is located at https://github.com/pytorch/fairseq/blob/master/LICENSE
 
 import math
 import torch

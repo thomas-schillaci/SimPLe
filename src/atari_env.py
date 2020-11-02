@@ -1,4 +1,3 @@
-import cv2
 import gym
 import numpy as np
 import torch
@@ -31,8 +30,18 @@ class AtariEnv(Env):
 
         self.current_rewards = []
 
+        self.initial_frames = None
+        self.initial_actions = None
+
+    def new_epoch(self):
+        self.initial_frames = None
+        self.initial_actions = None
+
+    def get_first_small_rollout(self):
+        return self.initial_frames, self.initial_actions
+
     def reset_sartv(self):
-        self.sequence = torch.empty((0, *self.config.frame_shape[1:]), dtype=torch.uint8)
+        self.sequence = torch.empty((0, *self.config.frame_shape), dtype=torch.uint8)
         self.actions = torch.empty((0, self.base_env.action_space.n), dtype=torch.uint8)
         self.rewards = torch.empty((0,), dtype=torch.uint8)
         self.targets = torch.empty((0, *self.config.frame_shape), dtype=torch.uint8)
@@ -40,17 +49,20 @@ class AtariEnv(Env):
 
     def add_interaction(self, last_obs, action, obs, reward):
         last_state = torch.tensor(last_obs, dtype=torch.uint8).permute((2, 0, 1))
-        self.sequence = torch.cat((self.sequence, last_state))
+        self.sequence = torch.cat((self.sequence, last_state.unsqueeze(0)))
+        action = one_hot_encode(action, self.base_env.action_space.n)
+        self.actions = torch.cat((self.actions, action.unsqueeze(0)))
 
-        n = len(self.sequence) // self.config.frame_shape[0]
+        n = len(self.sequence)
+
+        if n == self.config.stacking and self.initial_frames is None:
+            self.initial_frames = self.sequence
+            self.initial_actions = self.actions
 
         if n >= self.config.stacking:
-            action = one_hot_encode(action, self.base_env.action_space.n)
-            self.actions = torch.cat((self.actions, action.unsqueeze(0)))
-
             self.current_rewards.append(reward)
 
-            reward = (reward > 0) - (reward < 0)  # Convert to {-1; 0; 1}
+            # reward = (reward > 0) - (reward < 0)  # Convert to {-1; 0; 1}
             reward += 1  # Convert to {0; 1; 2}
             reward = torch.tensor(reward, dtype=torch.uint8)
             self.rewards = torch.cat((self.rewards, reward.unsqueeze(0)))
@@ -58,14 +70,19 @@ class AtariEnv(Env):
             target = torch.tensor(obs, dtype=torch.uint8).permute((2, 0, 1))
             self.targets = torch.cat((self.targets, target.unsqueeze(0)))
 
-        if n == self.config.stacking + self.config.inference_batch_size - 1:
+        if n == self.config.stacking + self.config.rollout_length - 1:
             self.buffer.append([self.sequence, self.actions, self.rewards, self.targets, None])
             self.reset_sartv()
 
-    def step(self, action):
+    def step(self, action, reduce_rewards=True):
         obs, reward, done, info = self.base_env.step(action)
-        self.render()
+
+        if self.config.render_training:
+            self.render()
+
         obs = self.downscale_obs(obs)
+        if reduce_rewards:
+            reward = (reward > 0) - (reward < 0)
 
         if self.recording:
             self.add_interaction(self.last_obs, action, obs, reward)
@@ -78,17 +95,14 @@ class AtariEnv(Env):
                 for i in range(len(self.buffer) - 1, -1, -1):
                     if self.buffer[i][-1] is not None:
                         break
-                    self.buffer[i][-1] = torch.empty((self.config.inference_batch_size,), dtype=torch.float32)
-                    for j in range(self.config.inference_batch_size - 1, -1, -1):
+                    self.buffer[i][-1] = torch.empty((self.config.rollout_length,), dtype=torch.float32)
+                    for j in range(self.config.rollout_length - 1, -1, -1):
                         value = self.current_rewards.pop() + self.config.ppo_gamma * value
                         self.buffer[i][-1][j] = value
 
                 assert not self.current_rewards
 
         self.last_obs = obs
-
-        # TODO hyper-parameter search, not on Freeway because its rewards are in {0; 1}
-        # reward = (reward > 0) - (reward < 0)
 
         return obs, reward, done, info
 
@@ -111,11 +125,31 @@ class AtariEnv(Env):
         obs = obs.numpy()
         return obs
 
-    def sample_buffer(self):
+    def sample_buffer(self, batch_size=-1):
         if not self.buffer:
             return None
         if self.buffer[0][-1] is None:
             return None
+
+        if batch_size != -1:
+            sequences = []
+            actions = []
+            rewards = []
+            targets = []
+            values = []
+            for _ in range(batch_size):
+                sequence, action, reward, target, value = self.sample_buffer()
+                sequences.append(sequence)
+                actions.append(action)
+                rewards.append(reward)
+                targets.append(target)
+                values.append(value)
+            sequences = torch.stack(sequences, dim=1)
+            actions = torch.stack(actions, dim=1)
+            rewards = torch.stack(rewards, dim=1)
+            targets = torch.stack(targets, dim=1)
+            values = torch.stack(values, dim=1)
+            return sequences, actions, rewards, targets, values
 
         index = int(torch.randint(len(self.buffer), size=(1,)))
 

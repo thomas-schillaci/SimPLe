@@ -84,6 +84,12 @@ class ParameterSealer:
     def eval(self):
         self.module.eval()
 
+    def state_dict(self):
+        return self.module.state_dict()
+
+    def load_state_dict(self, state_dict):
+        self.module.load_state_dict(state_dict)
+
 
 class ActionInjector(nn.Module):
 
@@ -148,7 +154,7 @@ def int_to_bit(x_int, num_bits):
     return res.float().to(x_int.device)
 
 
-def standardize_image(x):
+def standardize_frame(x):
     x_mean = torch.mean(x, dim=(-1, -2)).view((-1, 1, 1))
     x_var = torch.var(x, dim=(-1, -2)).view((-1, 1, 1))
     num_pixels = torch.tensor(x.shape[-1] * x.shape[-2], dtype=torch.float32).to(x.device)
@@ -183,18 +189,10 @@ def get_timing_signal_nd(shape, min_timescale=1.0, max_timescale=1.0e4):
     return res
 
 
-# TODO test which mix implementation performs best
-
-# def mix(x1, x2, epsilon):
-#     '''
-#     Returns ~ x1 * (1 - epsilon) + x2 * epsilon
-#     '''
-#     mask = torch.rand_like(x1)
-#     mask = (mask < epsilon).float()
-#     return (1 - mask) * x1 + mask * x2
-
 def mix(x1, x2, epsilon):
-    r = float(torch.rand((1,)))
-    if r > epsilon:
-        return x1
-    return x2
+    '''
+    Returns ~ x1 * (1 - epsilon) + x2 * epsilon
+    '''
+    mask = torch.rand_like(x1)
+    mask = (mask < epsilon).float()
+    return (1 - mask) * x1 + mask * x2

@@ -11,25 +11,47 @@ class SubprocVecEnv(subproc_vec_env.SubprocVecEnv):
         self.n_action = n_action
         self.config = config
         self.step_count = 0
+        self.frames = None
+        self.actions = None
 
     def step_async(self, actions):
-        self.step_count += 1
+        if self.step_count == 0:
+            res = self.env_method('get_initial_short_rollouts')
 
-        x = torch.stack(self.env_method('get_frame_stack_'))
-        x = x.to(self.config.device).float() / 255
-        actions = one_hot_encode(actions, self.n_action, dtype=torch.float32).to(self.config.device)
+            initial_frames = torch.stack([entry[0] for entry in res], dim=1)
+            initial_frames = initial_frames.float() / 255
+            initial_frames = initial_frames.to(self.config.device)
+
+            initial_actions = torch.stack([entry[1] for entry in res], dim=1)
+            initial_actions = initial_actions.float()
+            initial_actions = initial_actions.to(self.config.device)
+
+            self.model.warmup(initial_frames[:self.config.stacking], initial_actions[:self.config.stacking - 1])
+
+            self.frames = initial_frames[-1]
+
+        self.step_count += 1
 
         self.model.eval()
         with torch.no_grad():
-            states, rewards, values = self.model(x, actions)
+            actions = one_hot_encode(actions, self.n_action, dtype=torch.float32)
+            actions = actions.to(self.config.device)
+            states, rewards, values = self.model(self.frames, actions)
 
-        states = torch.argmax(states, dim=1).byte()
-        rewards = (torch.argmax(rewards, dim=1).cpu() - 1).numpy().astype('float')
+            states = torch.argmax(states, dim=1)
+            self.frames = states.float() / 255
+            states = states.detach().cpu().byte()
+            rewards = (torch.argmax(rewards, dim=1).detach().cpu() - 1).numpy().astype('float')
 
-        if self.step_count == self.config.rollout_length:
-            self.step_count = 0
-            rewards += values.cpu().numpy().astype('float')
+            # if int(rewards[0]) == 2:
+            #     print('reward')
 
-        for remote, arg in zip(self.remotes, zip(states, list(rewards))):
-            remote.send(('step', arg))
-        self.waiting = True
+            if self.step_count == self.config.rollout_length:
+                self.step_count = 0
+                rewards += values.detach().cpu().numpy().astype('float')
+
+            # print(rewards[0])
+
+            for remote, arg in zip(self.remotes, zip(states, list(rewards))):
+                remote.send(('step', arg))
+            self.waiting = True
