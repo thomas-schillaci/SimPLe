@@ -43,14 +43,9 @@ class SubprocVecEnv(subproc_vec_env.SubprocVecEnv):
             states = states.detach().cpu().byte()
             rewards = (torch.argmax(rewards, dim=1).detach().cpu() - 1).numpy().astype('float')
 
-            # if int(rewards[0]) == 2:
-            #     print('reward')
-
             if self.step_count == self.config.rollout_length:
                 self.step_count = 0
                 rewards += values.detach().cpu().numpy().astype('float')
-
-            # print(rewards[0])
 
             for remote, arg in zip(self.remotes, zip(states, list(rewards))):
                 remote.send(('step', arg))

@@ -8,10 +8,6 @@ from tqdm import trange
 
 from adafactor import Adafactor
 
-import matplotlib.pyplot as plot
-
-plot.rcParams["figure.figsize"] = (20, 10)  # FIXME
-
 
 class Trainer:
 
@@ -40,7 +36,7 @@ class Trainer:
         self.model.reward_estimator.eval()
         self.model.value_estimator.eval()
 
-        steps = [15, 1500, 15000][self.config.complexity]  # FIXME
+        steps = 15000
 
         if epoch == 0:
             steps *= 3
@@ -135,22 +131,6 @@ class Trainer:
 
             float_losses[i, 0] = float(loss)
 
-            # if float(torch.rand((1,))) > 0.9995 and i > 2:
-            #     for k in range(4):
-            #         plot.subplot(2, 5, k + 1)
-            #         plot.imshow(sequences[i - 3 + k, 0].permute((1, 2, 0)).detach().cpu().numpy())
-            #         plot.axis('off')
-            #     plot.subplot(2, 5, 5)
-            #     plot.imshow((target[0].float() / 255).permute((1, 2, 0)).detach().cpu().numpy())
-            #     plot.axis('off')
-            #     plot.subplot(2, 5, 10)
-            #     plot.imshow((torch.argmax(frames_pred[0], 0).float() / 255).permute((1, 2, 0))
-            #                 .detach().cpu().numpy())
-            #     plot.axis('off')
-            #     plot.suptitle(f'action: {torch.argmax(action[0], dim=0).detach().cpu().numpy()}'
-            #                   f' - loss: {float_losses[i, 0]}')
-            #     plot.show()
-
             loss = self.model.stochastic_model.get_lstm_loss()
 
             self.optimizers[1].zero_grad()
@@ -179,15 +159,15 @@ class Trainer:
         self.model.eval()
         self.model.reward_estimator.train()
 
-        steps = [1, 15, 150][self.config.complexity]  # FIXME
+        steps = 150
         steps *= self.config.reward_model_batch_size
 
-        epochs = [1, 1, 7][self.config.complexity]  # FIXME
+        epochs = 7
 
         if epoch == 0:
             epochs *= 3
 
-        with trange(epochs, desc='Training reward model') as t:
+        with trange(0, epochs * steps, steps, desc='Training reward model', unit_scale=steps) as t:
             for _ in t:
                 reward_counts = [0] * 3
                 for _, _, rewards, _, _ in real_env.buffer:
@@ -244,11 +224,6 @@ class Trainer:
                                 rewards = torch.cat((rewards, reward.unsqueeze(0)))
                                 count += 1
 
-                # reward_counts = [0] * 3
-                # for reward in rewards:
-                #     reward_counts[int(reward)] += 1
-                # print(reward_counts)
-
                 permutation = torch.randperm(len(rewards))
                 frames = frames[:, permutation]
                 actions = actions[:, permutation]
@@ -271,7 +246,6 @@ class Trainer:
         rewards = rewards.long()
 
         batch_size = self.config.reward_model_batch_size
-        mean_loss = 0
         for i in range(len(rewards) // batch_size):
             frame = frames[:, i * batch_size:(i + 1) * batch_size].to(self.config.device)
             action = actions[:, i * batch_size:(i + 1) * batch_size].to(self.config.device)
@@ -280,42 +254,27 @@ class Trainer:
             self.model.warmup(frame[:self.config.stacking], action[:self.config.stacking - 1])
 
             reward_pred = self.model(frame[-1], action[-1])[1]
-            # frame_pred, reward_pred, value_pred = self.model(frame[-1], action[-1])
-            #
-            # if float(torch.rand((1,))) > 0.9 or int(torch.argmax(reward_pred[0],dim=0))==2:
-            #     plot.subplot(1, 2, 1)
-            #     plot.imshow(frame[-1, 0].permute((1, 2, 0)).detach().cpu().numpy())
-            #     plot.axis('off')
-            #     plot.subplot(1, 2, 2)
-            #     plot.imshow((torch.argmax(frame_pred[0], dim=0).float() / 255).permute((1, 2, 0)).detach().cpu().numpy())
-            #     plot.axis('off')
-            #     plot.suptitle(f'reward: {reward[0]} - reward_pred: {reward_pred[0].detach().cpu().numpy()}')
-            #     plot.show()
-
             loss = nn.CrossEntropyLoss()(reward_pred, reward)
-            mean_loss += float(loss)
 
             self.reward_optimizer.zero_grad()
             loss.backward()
             clip_grad_norm_(self.model.reward_estimator.parameters(), self.config.clip_grad_norm)
             self.reward_optimizer.step()
 
-        mean_loss = mean_loss / (len(rewards) // batch_size)
-
-        if self.config.use_wandb:
-            import wandb
-            wandb.log({'loss_reward': mean_loss, 'reward_step': self.reward_step})
-            self.reward_step += len(rewards) // batch_size
+            if self.config.use_wandb:
+                import wandb
+                wandb.log({'loss_reward': float(loss), 'reward_step': self.reward_step})
+                self.reward_step += 1
 
         del frames, actions, rewards
 
-        return mean_loss
+        return float(loss)
 
     def train_value_model(self, epoch, sample_buffer):
         self.model.eval()
         self.model.value_estimator.train()
 
-        steps = [15, 1500, 4000][self.config.complexity]  # FIXME
+        steps = 4000
 
         if epoch == 0:
             steps *= 3

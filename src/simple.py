@@ -70,10 +70,9 @@ class SimPLe:
             z = 2
         if epoch == 14:
             z = 3
-        n = [1, 100, 1000][self.config.complexity]  # FIXME
+        n = 1000
         self.set_agent_env(self.simulated_env)
 
-        # with trange(n * z * int(16 / self.config.agents), desc='Training agent in simulated env') as t:
         with trange(n * z, desc='Training agent in simulated env') as t:
             for _ in t:
                 for i in range(self.config.agents):
@@ -164,11 +163,10 @@ if __name__ == '__main__':
     parser.add_argument('--bottleneck-bits', type=int, default=128)
     parser.add_argument('--bottleneck-noise', type=float, default=0.1)
     parser.add_argument('--clip-grad-norm', type=float, default=1.0)
-    parser.add_argument('--complexity', type=int, default=2)  # FIXME
     parser.add_argument('--compress-steps', type=int, default=5)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--dropout', type=float, default=0.15)
-    parser.add_argument('--env-name', type=str, default='FreewayDeterministic-v4')
+    parser.add_argument('--env-name', type=str, default='KrullDeterministic-v4')
     parser.add_argument('--experiment-name', type=str, default=strftime('%d-%m-%y-%H:%M:%S'))
     parser.add_argument('--filter-double-steps', type=int, default=3)
     parser.add_argument('--frame-shape', type=int, nargs=3, default=(3, 105, 80))
@@ -178,7 +176,7 @@ if __name__ == '__main__':
     parser.add_argument('--latent-state-size', type=int, default=128)
     parser.add_argument('--latent-use-max-probability', type=float, default=0.8)
     parser.add_argument('--load-models', default=False, action='store_true')
-    parser.add_argument('--ppo-gamma', type=float, default=0.95)
+    parser.add_argument('--ppo-gamma', type=float, default=0.99)
     parser.add_argument('--recurrent-state-size', type=int, default=64)
     parser.add_argument('--render-training', default=False, action='store_true')
     parser.add_argument('--residual-dropout', type=float, default=0.5)

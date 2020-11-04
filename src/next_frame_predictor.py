@@ -35,17 +35,17 @@ class ValueEstimator(nn.Module):
 
 class MiddleNetwork(nn.Module):
 
-    def __init__(self, config, shape):
+    def __init__(self, config, filters):
         super().__init__()
         self.config = config
 
         self.middle_network = []
         for i in range(self.config.hidden_layers):
-            self.middle_network.append(nn.Conv2d(shape[0], shape[0], 3, padding=1))
+            self.middle_network.append(nn.Conv2d(filters, filters, 3, padding=1))
             if i == 0:
                 self.middle_network.append(None)
             else:
-                self.middle_network.append(nn.LayerNorm(shape[1:]))
+                self.middle_network.append(nn.InstanceNorm2d(filters, affine=True, eps=1e-6))
         self.middle_network = nn.ModuleList(self.middle_network)
 
     def forward(self, x):
@@ -212,7 +212,6 @@ class NextFramePredictor(Container):
         # Internal states
 
         self.internal_states = None
-        self.warm = False
         self.gate = nn.Conv2d(
             self.config.frame_shape[0] + self.config.recurrent_state_size,
             2 * self.config.recurrent_state_size,
@@ -240,7 +239,7 @@ class NextFramePredictor(Container):
 
             self.downscale_layers.append(
                 nn.Conv2d(in_filters, filters, 4, stride=2, padding=1))
-            self.downscale_layers.append(nn.LayerNorm(shape))
+            self.downscale_layers.append(nn.InstanceNorm2d(filters, affine=True, eps=1e-6))
 
         self.downscale_layers = nn.ModuleList(self.downscale_layers)
 
@@ -262,7 +261,7 @@ class NextFramePredictor(Container):
             self.upscale_layers.append(nn.ConvTranspose2d(
                 in_filters, filters, 2, stride=2, output_padding=output_padding
             ))
-            self.upscale_layers.append(nn.LayerNorm(shape))
+            self.upscale_layers.append(nn.InstanceNorm2d(filters, affine=True, eps=1e-6))
 
         self.upscale_layers = nn.ModuleList(self.upscale_layers)
         self.action_injectors = nn.ModuleList(self.action_injectors)
@@ -270,7 +269,7 @@ class NextFramePredictor(Container):
         self.logits = nn.Conv2d(self.config.hidden_size, 256 * self.config.frame_shape[0], 1)
 
         # Sub-models
-        self.middle_network = MiddleNetwork(self.config, middle_shape)
+        self.middle_network = MiddleNetwork(self.config, middle_shape[0])
         self.reward_estimator = ParameterSealer(RewardEstimator(self.config, middle_shape[0] + filters))
         self.value_estimator = ParameterSealer(ValueEstimator(middle_shape[0] * middle_shape[1] * middle_shape[2]))
         self.stochastic_model = StochasticModel(self.config, middle_shape, n_action)
@@ -297,7 +296,6 @@ class NextFramePredictor(Container):
 
         batch_size = frames.shape[1]
         self.init_internal_states(batch_size)
-        self.warm = True
 
         loss = torch.zeros((1,)).to(frames.device)
 
@@ -309,9 +307,6 @@ class NextFramePredictor(Container):
             loss = loss + nn.CrossEntropyLoss()(frame_pred, target)
 
         return loss
-
-    def is_warm(self):
-        return self.warm
 
     def forward(self, x, action, target=None, epsilon=0.0):
         x_start = torch.stack([standardize_frame(frame) for frame in x])

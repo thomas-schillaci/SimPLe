@@ -6,7 +6,9 @@ Unofficial PyTorch implementation of the [SimPLe algorithm](https://arxiv.org/ab
 - [How to use](#how-to-use)
 - [Stats](#stats)
 
-**TODO** gif.
+![World model predictions on freeway](src/res/freeway_wm.gif)
+
+*SimPLe predicting 46 frames in the future from 4 initial frames on FreewayDeterministic-v4.*
 
 ## Installation
 
@@ -16,24 +18,23 @@ This program requires **python 3.7**.
 
 This program uses CUDA 10.2 by default. The following command should install it by default.
 
-**TODO** check CUDA for tensorflow-gpu
-
-Run the following command to install the dependencies:
-```bash
-pip install stable-baselines==2.10.1 torch==1.6.0 tensorflow-gpu==1.14.0 tqdm==4.49.0 numpy==1.16.4
-```
+- Run the following command to install the dependencies:
+  ```shell script
+  pip install stable-baselines==2.10.1 torch==1.6.0 tensorflow-gpu==1.14.0 tqdm==4.49.0 numpy==1.16.4
+  ```
+- Follow the [Tensorflow GPU compatibility guide](https://www.tensorflow.org/install/gpu) to ensure tensorflow-gpu works.
 
 ### Without CUDA
 
-Run the following command to install the dependencies:
-```bash
+- Run the following command to install the dependencies:
+```shell script
 pip install stable-baselines==2.10.1 torch==1.6.0 tensorflow==1.14.0 tqdm==4.49.0 numpy==1.16.4
 ```
 
 ### Install wandb (optional)
 
-You can use [wandb](https://www.wandb.com/) to track your experiment:
-```bash
+You can use [wandb](https://www.wandb.com/) to track your experiments:
+```shell script
 pip install wandb==0.10.8
 ```
 
@@ -44,7 +45,7 @@ To use wandb, pass the flag `--use-wandb` when running the program. See [How to 
 CUDA is enabled by default, see the following section to disable it.
 
 To run the program, run the following command from the `src` directory:
-```bash
+```shell script
 python simple.py
 ```
 
@@ -73,14 +74,28 @@ The following boolean flags are set to `False` if not passed to the command line
 | --use-wandb | Enables [wandb](https://www.wandb.com/) to track the experiment |
 
 For example, to run the program without CUDA and to render the environments during training, run:
-```bash
+```shell script
 python simple.py --device cpu --render-training
 ```
 
 
 ## Stats
 
-- Using CUDA, training the agent and the models takes ~16h on a Nvidia GTX 1070 GPU
+### Per environment performance
+
+The scores* obtained with this implementation are detailed in the following table:
+
+| Environment | Score | % of reported score in the original paper |
+| ----------- | ---:  | ---:                                      |
+| FreewayDeterministic-v4 | 20.3 | 100.0% |
+| KrullDeterministic-v4 | N/A | N/A |
+| KungFuMasterDeterministic-v4 | N/A | N/A |
+
+**Scores obtained on only one full training per environment.*
+
+### Miscellaneous
+
+- Using CUDA, training the agent and the models takes ~50h on a Nvidia GTX 1070 GPU
 - Training the models requires 8Gb of GPU VRAM
 - Training the PPO agents on 4 agents requires 16Gb of RAM. If your machine runs out of memory, consider reducing the number of agents by passing the `--agents` flag 
 - This program was tested on Ubuntu 20.04.1 LTS

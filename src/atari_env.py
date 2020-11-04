@@ -62,7 +62,6 @@ class AtariEnv(Env):
         if n >= self.config.stacking:
             self.current_rewards.append(reward)
 
-            # reward = (reward > 0) - (reward < 0)  # Convert to {-1; 0; 1}
             reward += 1  # Convert to {0; 1; 2}
             reward = torch.tensor(reward, dtype=torch.uint8)
             self.rewards = torch.cat((self.rewards, reward.unsqueeze(0)))

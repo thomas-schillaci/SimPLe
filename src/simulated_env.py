@@ -1,9 +1,6 @@
 import cv2
-import gym
-import torch
 from gym import Env, spaces
 import numpy as np
-from stable_baselines.common.env_checker import check_env
 
 
 class SimulatedEnv(Env):
