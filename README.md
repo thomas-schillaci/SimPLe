@@ -1,6 +1,8 @@
 # SimPLe PyTorch
 
-Unofficial PyTorch implementation of the [SimPLe algorithm](https://arxiv.org/abs/1903.00374) for the Arcade Learning Environment's Atari 2600 games.
+Unofficial PyTorch implementation of the SimPLe algorithm for the Arcade Learning Environment's Atari 2600 games.
+
+Based on the paper [Model-Based Reinforcement Learning for Atari](https://arxiv.org/abs/1903.00374).
 
 - [Installation](#installation)
 - [How to use](#how-to-use)
@@ -88,14 +90,15 @@ The scores* obtained with this implementation are detailed in the following tabl
 | Environment | Score | % of reported score in the original paper |
 | ----------- | ---:  | ---:                                      |
 | FreewayDeterministic-v4 | 20.3 | 100.0% |
-| KrullDeterministic-v4 | N/A | N/A |
+| KrullDeterministic-v4 | 3418.2 | 82.6% |
 | KungFuMasterDeterministic-v4 | N/A | N/A |
 
-**Scores obtained on only one full training per environment.*
+**Scores obtained on only one full training per environment. More numbers to come.*
 
 ### Miscellaneous
 
 - Using CUDA, training the agent and the models takes ~50h on a Nvidia GTX 1070 GPU
 - Training the models requires 8Gb of GPU VRAM
 - Training the PPO agents on 4 agents requires 16Gb of RAM. If your machine runs out of memory, consider reducing the number of agents by passing the `--agents` flag 
+- **In the original paper, 16 parallel agents are used. Use the flag** `--agents 16` **to replicate this.**
 - This program was tested on Ubuntu 20.04.1 LTS

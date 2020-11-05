@@ -63,6 +63,7 @@ class SimPLe:
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo'))
+            np.save(os.path.join('models', 'buffer.npy'), self.real_env.buffer)
 
     def train_agent_sim_env(self, epoch):
         z = 1
@@ -120,7 +121,7 @@ class SimPLe:
             import wandb
             wandb.log({'cum_reward': np.mean(cum_rewards)})
 
-    def load_model(self):
+    def load_models(self):
         self.model.load_state_dict(torch.load(os.path.join('models', 'model.pt')))
         self.model.stochastic_model.bits_predictor.load_state_dict(
             torch.load(os.path.join('models', 'bits_predictor.pt'))
@@ -128,6 +129,7 @@ class SimPLe:
         self.model.reward_estimator.load_state_dict(torch.load(os.path.join('models', 'reward_model.pt')))
         self.model.value_estimator.load_state_dict(torch.load(os.path.join('models', 'value_model.pt')))
         self.agent = PPO2.load(os.path.join('models', 'ppo'))
+        self.real_env.buffer = np.load(os.path.join('models', 'buffer.npy'), allow_pickle=True)
 
     def train(self):
         self.train_agent_real_env()
@@ -199,9 +201,12 @@ if __name__ == '__main__':
         display = '{:<%i}: {}' % (max_len + 1)
         print(display.format(arg, value))
 
+    if config.save_models and not os.path.isdir('models'):
+        os.mkdir('models')
+
     simple = SimPLe(config)
     if config.load_models:
-        simple.load_model()
+        simple.load_models()
     else:
         simple.train()
     simple.test()

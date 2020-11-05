@@ -259,7 +259,7 @@ class NextFramePredictor(Container):
             shape = [filters, shape[1] + output_padding[0], shape[2] + output_padding[1]]
 
             self.upscale_layers.append(nn.ConvTranspose2d(
-                in_filters, filters, 2, stride=2, output_padding=output_padding
+                in_filters, filters, 4, stride=2, padding=1, output_padding=output_padding
             ))
             self.upscale_layers.append(nn.InstanceNorm2d(filters, affine=True, eps=1e-6))
 

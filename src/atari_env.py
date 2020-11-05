@@ -14,7 +14,8 @@ class AtariEnv(Env):
         self.config = config
         self.base_env = gym.make(base_env_name)
         self.action_space = self.base_env.action_space
-        self.observation_space = spaces.Box(low=0, high=255, shape=(105, 80, 3), dtype=np.uint8)
+        shape = (*self.config.frame_shape[1:], self.config.frame_shape[0])
+        self.observation_space = spaces.Box(low=0, high=255, shape=shape, dtype=np.uint8)
         self.recording = recording
 
         self.buffer = []

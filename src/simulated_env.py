@@ -21,7 +21,7 @@ class SimulatedEnv(Env):
         return self.initial_frames, self.initial_actions
 
     def step(self, args):
-        state, reward = args
+        state, reward, done = args
 
         state = state.permute((1, 2, 0)).cpu().detach().numpy()
         self.last_state = state
@@ -29,7 +29,7 @@ class SimulatedEnv(Env):
         if self.main and self.config.render_training:
             self.render()
 
-        return state, reward, False, {}
+        return state, reward, done, {}
 
     def reset(self):
         return self.initial_frames[-1].permute((1, 2, 0)).cpu().detach().numpy()
