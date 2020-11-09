@@ -139,12 +139,16 @@ class StochasticModel(Container):
 
         self.action_injector = ActionInjector(n_action, self.config.hidden_size)
         self.mean_attentions = nn.ModuleList([MeanAttention(n_filter, 2 * channels) for n_filter in filters])
-        self.bits_predictor = ParameterSealer(BitsPredictor(
+        bits_predictor = BitsPredictor(
             config,
             layer_shape[0] * layer_shape[1] * layer_shape[2],
             self.config.latent_state_size,
             self.config.bottleneck_bits
-        ))
+        )
+        if self.config.decouple_optimizers:
+            self.bits_predictor = ParameterSealer(bits_predictor)
+        else:
+            self.bits_predictor = bits_predictor
 
     def add_bits(self, layer, bits):
         z_mul = self.dense2(bits)
@@ -270,9 +274,16 @@ class NextFramePredictor(Container):
 
         # Sub-models
         self.middle_network = MiddleNetwork(self.config, middle_shape[0])
-        self.reward_estimator = ParameterSealer(RewardEstimator(self.config, middle_shape[0] + filters))
-        self.value_estimator = ParameterSealer(ValueEstimator(middle_shape[0] * middle_shape[1] * middle_shape[2]))
+        reward_estimator = RewardEstimator(self.config, middle_shape[0] + filters)
+        value_estimator = ValueEstimator(middle_shape[0] * middle_shape[1] * middle_shape[2])
         self.stochastic_model = StochasticModel(self.config, middle_shape, n_action)
+
+        if self.config.decouple_optimizers:
+            self.reward_estimator = ParameterSealer(reward_estimator)
+            self.value_estimator = ParameterSealer(value_estimator)
+        else:
+            self.reward_estimator = reward_estimator
+            self.value_estimator = value_estimator
 
     def init_internal_states(self, batch_size):
         self.internal_states = torch.zeros(

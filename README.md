@@ -87,18 +87,17 @@ python simple.py --device cpu --render-training
 
 The scores* obtained with this implementation are detailed in the following table:
 
-| Environment | Score | % of reported score in the original paper |
-| ----------- | ---:  | ---:                                      |
-| FreewayDeterministic-v4 | 20.3 | 100.0% |
-| KrullDeterministic-v4 | 3418.2 | 82.6% |
-| KungFuMasterDeterministic-v4 | N/A | N/A |
+| Environment | Score | Paper's score | % of reported score in the original paper |
+| ----------- | ---:  | ---:          | ---:                                      |
+| FreewayDeterministic-v4 | 20.3 | 20.3 | 100.0% |
+| KrullDeterministic-v4 | 3418.2 | 4539.9 | 82.6% |
+| KungFuMasterDeterministic-v4 | N/A | 17257.2 | N/A |
 
 **Scores obtained on only one full training per environment. More numbers to come.*
 
 ### Miscellaneous
 
 - Using CUDA, training the agent and the models takes ~50h on a Nvidia GTX 1070 GPU
-- Training the models requires 8Gb of GPU VRAM
 - Training the PPO agents on 4 agents requires 16Gb of RAM. If your machine runs out of memory, consider reducing the number of agents by passing the `--agents` flag 
 - **In the original paper, 16 parallel agents are used. Use the flag** `--agents 16` **to replicate this.**
 - This program was tested on Ubuntu 20.04.1 LTS

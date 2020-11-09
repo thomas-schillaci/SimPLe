@@ -1,8 +1,8 @@
-import os
-
 import tensorflow as tf
 
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+import os
+
 from tqdm import trange
 import argparse
 from stable_baselines.common.vec_env import DummyVecEnv
@@ -133,7 +133,7 @@ class SimPLe:
 
     def train(self):
         self.train_agent_real_env()
-        self.evaluate_agent()
+        # self.evaluate_agent()
 
         for epoch in trange(15, desc='Epoch'):
             self.trainer.train(epoch, self.real_env)
@@ -166,9 +166,11 @@ if __name__ == '__main__':
     parser.add_argument('--bottleneck-noise', type=float, default=0.1)
     parser.add_argument('--clip-grad-norm', type=float, default=1.0)
     parser.add_argument('--compress-steps', type=int, default=5)
+    parser.add_argument('--decouple-optimizers', default=False, action='store_true')
     parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--done-on-final-rollout-step', default=False, action='store_true')
     parser.add_argument('--dropout', type=float, default=0.15)
-    parser.add_argument('--env-name', type=str, default='KrullDeterministic-v4')
+    parser.add_argument('--env-name', type=str, default='FreewayDeterministic-v4')
     parser.add_argument('--experiment-name', type=str, default=strftime('%d-%m-%y-%H:%M:%S'))
     parser.add_argument('--filter-double-steps', type=int, default=3)
     parser.add_argument('--frame-shape', type=int, nargs=3, default=(3, 105, 80))

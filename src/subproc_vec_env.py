@@ -47,8 +47,8 @@ class SubprocVecEnv(subproc_vec_env.SubprocVecEnv):
                 self.step_count = 0
                 rewards += values.detach().cpu().numpy().astype('float')
 
-            # done = self.step_count == self.config.rollout_length  # FIXME does this improve performance?
-            done = False
+            done = self.config.done_on_final_rollout_step and self.step_count == self.config.rollout_length
+
             for remote, arg in zip(self.remotes, zip(states, list(rewards))):
                 arg = (*arg, done)
                 remote.send(('step', arg))
