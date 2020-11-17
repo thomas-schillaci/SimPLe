@@ -1,24 +1,30 @@
 import gym
-import numpy as np
 import torch
-import torch.nn.functional as F
-from gym import Env, spaces
+from baselines.common.atari_wrappers import make_atari, EpisodicLifeEnv, WarpFrame
 
+from a2c_ppo_acktr.envs import TransposeImage
 from utils import one_hot_encode
 
 
-class AtariEnv(Env):
+class ClipRewardEnv(gym.Wrapper):
+    def __init__(self, env):
+        gym.Wrapper.__init__(self, env)
 
-    def __init__(self, config, base_env_name, recording=True):
-        super(AtariEnv, self).__init__()
+    def step(self, action, reduce_rewards=False):
+        obs, reward, done, info = super().step(action)
+        if reduce_rewards:
+            reward = (reward > 0) - (reward < 0)
+        return obs, reward, done, info
+
+
+class RecorderEnv(gym.Wrapper):
+
+    def __init__(self, env, config):
+        super().__init__(env)
         self.config = config
-        self.base_env = gym.make(base_env_name)
-        self.action_space = self.base_env.action_space
-        shape = (*self.config.frame_shape[1:], self.config.frame_shape[0])
-        self.observation_space = spaces.Box(low=0, high=255, shape=shape, dtype=np.uint8)
-        self.recording = recording
-
+        self.recording = True
         self.buffer = []
+
         self.last_obs = None
         self.values = 0
 
@@ -34,96 +40,8 @@ class AtariEnv(Env):
         self.initial_frames = None
         self.initial_actions = None
 
-    def new_epoch(self):
-        self.initial_frames = None
-        self.initial_actions = None
-
-    def get_first_small_rollout(self):
-        return self.initial_frames, self.initial_actions
-
-    def reset_sartv(self):
-        self.sequence = torch.empty((0, *self.config.frame_shape), dtype=torch.uint8)
-        self.actions = torch.empty((0, self.base_env.action_space.n), dtype=torch.uint8)
-        self.rewards = torch.empty((0,), dtype=torch.uint8)
-        self.targets = torch.empty((0, *self.config.frame_shape), dtype=torch.uint8)
-        self.values = torch.empty((0,), dtype=torch.float32)
-
-    def add_interaction(self, last_obs, action, obs, reward):
-        last_state = torch.tensor(last_obs, dtype=torch.uint8).permute((2, 0, 1))
-        self.sequence = torch.cat((self.sequence, last_state.unsqueeze(0)))
-        action = one_hot_encode(action, self.base_env.action_space.n)
-        self.actions = torch.cat((self.actions, action.unsqueeze(0)))
-
-        n = len(self.sequence)
-
-        if n == self.config.stacking and self.initial_frames is None:
-            self.initial_frames = self.sequence
-            self.initial_actions = self.actions
-
-        if n >= self.config.stacking:
-            self.current_rewards.append(reward)
-
-            reward += 1  # Convert to {0; 1; 2}
-            reward = torch.tensor(reward, dtype=torch.uint8)
-            self.rewards = torch.cat((self.rewards, reward.unsqueeze(0)))
-
-            target = torch.tensor(obs, dtype=torch.uint8).permute((2, 0, 1))
-            self.targets = torch.cat((self.targets, target.unsqueeze(0)))
-
-        if n == self.config.stacking + self.config.rollout_length - 1:
-            self.buffer.append([self.sequence, self.actions, self.rewards, self.targets, None])
-            self.reset_sartv()
-
-    def step(self, action, reduce_rewards=True):
-        obs, reward, done, info = self.base_env.step(action)
-
-        if self.config.render_training:
-            self.render()
-
-        obs = self.downscale_obs(obs)
-        if reduce_rewards:
-            reward = (reward > 0) - (reward < 0)
-
-        if self.recording:
-            self.add_interaction(self.last_obs, action, obs, reward)
-
-            if done:
-                for _ in range(len(self.rewards)):
-                    self.current_rewards.pop()
-                self.reset_sartv()
-                value = 0
-                for i in range(len(self.buffer) - 1, -1, -1):
-                    if self.buffer[i][-1] is not None:
-                        break
-                    self.buffer[i][-1] = torch.empty((self.config.rollout_length,), dtype=torch.float32)
-                    for j in range(self.config.rollout_length - 1, -1, -1):
-                        value = self.current_rewards.pop() + self.config.ppo_gamma * value
-                        self.buffer[i][-1][j] = value
-
-                assert not self.current_rewards
-
-        self.last_obs = obs
-
-        return obs, reward, done, info
-
-    def reset(self):
-        self.last_obs = self.base_env.reset()
-        self.last_obs = self.downscale_obs(self.last_obs)
-        return self.last_obs
-
-    def render(self, mode='human'):
-        self.base_env.render(mode)
-
-    def close(self):
-        self.base_env.close()
-
-    def downscale_obs(self, obs):
-        obs = torch.tensor(obs, dtype=torch.float32)
-        obs = obs.permute((2, 0, 1))
-        obs = F.interpolate(obs.unsqueeze(0), self.config.frame_shape[1:]).squeeze()
-        obs = obs.permute((1, 2, 0))
-        obs = obs.numpy()
-        return obs
+    def set_recording(self, recording):
+        self.recording = recording
 
     def sample_buffer(self, batch_size=-1):
         if not self.buffer:
@@ -158,5 +76,85 @@ class AtariEnv(Env):
 
         return self.buffer[index]
 
-    def set_recording(self, recording):
-        self.recording = recording
+    def new_epoch(self):
+        self.initial_frames = None
+        self.initial_actions = None
+
+    def get_first_small_rollout(self):
+        return self.initial_frames, self.initial_actions
+
+    def reset_sartv(self):
+        self.sequence = torch.empty((0, *self.config.frame_shape), dtype=torch.uint8)
+        self.actions = torch.empty((0, self.action_space.n), dtype=torch.uint8)
+        self.rewards = torch.empty((0,), dtype=torch.uint8)
+        self.targets = torch.empty((0, *self.config.frame_shape), dtype=torch.uint8)
+        self.values = torch.empty((0,), dtype=torch.float32)
+
+    def add_interaction(self, last_obs, action, obs, reward):
+        last_state = torch.tensor(last_obs, dtype=torch.uint8)
+        self.sequence = torch.cat((self.sequence, last_state.unsqueeze(0)))
+        action = one_hot_encode(action, self.action_space.n)
+        self.actions = torch.cat((self.actions, action))
+
+        n = len(self.sequence)
+
+        if n == self.config.stacking and self.initial_frames is None:
+            self.initial_frames = self.sequence
+            self.initial_actions = self.actions
+
+        if n >= self.config.stacking:
+            self.current_rewards.append(reward)
+
+            reward += 1  # Convert to {0; 1; 2}
+            reward = torch.tensor(reward, dtype=torch.uint8)
+            self.rewards = torch.cat((self.rewards, reward.unsqueeze(0)))
+
+            target = torch.tensor(obs, dtype=torch.uint8)
+            self.targets = torch.cat((self.targets, target.unsqueeze(0)))
+
+        if n == self.config.stacking + self.config.rollout_length - 1:
+            self.buffer.append([self.sequence, self.actions, self.rewards, self.targets, None])
+            self.reset_sartv()
+
+    def step(self, action):
+        obs, reward, done, info = super().step(action)
+
+        if self.config.render_training:
+            self.render()
+
+        if self.recording:
+            self.add_interaction(self.last_obs, action, obs, reward)
+
+            if done:
+                for _ in range(len(self.rewards)):
+                    self.current_rewards.pop()
+                self.reset_sartv()
+                value = 0
+                for i in range(len(self.buffer) - 1, -1, -1):
+                    if self.buffer[i][-1] is not None:
+                        break
+                    self.buffer[i][-1] = torch.empty((self.config.rollout_length,), dtype=torch.float32)
+                    for j in range(self.config.rollout_length - 1, -1, -1):
+                        value = self.current_rewards.pop() + self.config.ppo_gamma * value
+                        self.buffer[i][-1][j] = value
+
+                assert not self.current_rewards
+
+        self.last_obs = obs
+
+        return obs, reward, done, info
+
+    def reset(self):
+        obs = super().reset()
+        self.last_obs = obs
+        return obs
+
+
+def make_env(config):
+    env = make_atari(f'{config.env_name}NoFrameskip-v0', max_episode_steps=10000)
+    env = EpisodicLifeEnv(env)
+    env = WarpFrame(env, width=config.frame_shape[2], height=config.frame_shape[1], grayscale=False)
+    env = TransposeImage(env)
+    env = ClipRewardEnv(env)
+    env = RecorderEnv(env, config)
+    return env

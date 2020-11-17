@@ -34,6 +34,7 @@ class Trainer:
         self.value_step = 1
 
     def train(self, epoch, real_env):
+        return
         self.train_world_model(epoch, real_env.sample_buffer)
         if self.config.decouple_optimizers:
             self.train_reward_model(epoch, real_env)

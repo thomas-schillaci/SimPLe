@@ -14,24 +14,22 @@ Based on the paper [Model-Based Reinforcement Learning for Atari](https://arxiv.
 
 ## Installation
 
-This program requires **python 3.7**.
+This program requires **python 3.7** and uses **CUDA 10.2** if enabled.
 
-### Using CUDA
-
-This program uses CUDA 10.2 by default. The following command should install it by default.
+### Using pip
 
 - Run the following command to install the dependencies:
   ```shell script
-  pip install stable-baselines==2.10.1 torch==1.6.0 tensorflow-gpu==1.14.0 tqdm==4.49.0 numpy==1.16.4
+  pip install torch==1.6.0 torchvision==0.7.0 tqdm==4.49.0 numpy==1.16.4
+  
+  git clone https://github.com/openai/baselines.git
+  cd baselines
+  pip install -e .
   ```
-- Follow the [Tensorflow GPU compatibility guide](https://www.tensorflow.org/install/gpu) to ensure tensorflow-gpu works.
 
-### Without CUDA
+### Using conda
 
-- Run the following command to install the dependencies:
-```shell script
-pip install stable-baselines==2.10.1 torch==1.6.0 tensorflow==1.14.0 tqdm==4.49.0 numpy==1.16.4
-```
+TODO
 
 ### Install wandb (optional)
 

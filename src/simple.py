@@ -1,42 +1,29 @@
-import tensorflow as tf
-
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import os
-
-from tqdm import trange
-import argparse
-from stable_baselines.common.vec_env import DummyVecEnv
-from subproc_vec_env import SubprocVecEnv
 import time
-from next_frame_predictor import NextFramePredictor
-from trainer import Trainer
-from stable_baselines.common.policies import CnnPolicy
-from atari_env import AtariEnv
-from simulated_env import SimulatedEnv
+import argparse
 from time import strftime
+
 import torch
 import numpy as np
-from stable_baselines import PPO2
+from tqdm import trange
+from baselines.common.vec_env import DummyVecEnv
+
+from ppo import PPO, load
+from subproc_vec_env import make_simulated_env, VecPytorchWrapper
+from trainer import Trainer
+from atari_env import make_env
+from next_frame_predictor import NextFramePredictor
 
 
 class SimPLe:
 
     def __init__(self, config):
         self.config = config
-        self.real_env = AtariEnv(config, base_env_name=config.env_name)
+        self.real_env = make_env(config)
         self.model = NextFramePredictor(config, self.real_env.action_space.n).to(config.device)
         self.trainer = Trainer(self.model, config)
-        self.simulated_env = [
-            SimulatedEnv.construct(config, self.real_env.action_space, i == 0) for i in range(config.agents)
-        ]
-        self.simulated_env = SubprocVecEnv(self.simulated_env, self.model, self.real_env.action_space.n, config)
-        self.agent = PPO2(
-            CnnPolicy,
-            self.simulated_env,
-            gamma=self.config.ppo_gamma,
-            n_steps=self.config.rollout_length,
-            nminibatches=5
-        )
+        self.simulated_env = make_simulated_env(config, self.model, self.real_env.action_space)
+        self.agent = PPO(self.simulated_env, config, num_steps=self.config.rollout_length, num_mini_batch=5)
 
         if self.config.use_wandb:
             import wandb
@@ -46,11 +33,9 @@ class SimPLe:
     def set_agent_env(self, env):
         assert env == self.real_env or env == self.simulated_env
         if env == self.real_env:
-            self.agent.set_env(DummyVecEnv((lambda: self.real_env,)))
+            self.agent.set_env(VecPytorchWrapper(DummyVecEnv([lambda: self.real_env])))
         else:
             self.agent.set_env(self.simulated_env)
-        # PPO2 is not updated properly with set_env, this fixes the issue
-        self.agent.n_batch = self.agent.n_envs * self.agent.n_steps
 
     def train_agent_real_env(self):
         self.real_env.set_recording(True)
@@ -59,7 +44,7 @@ class SimPLe:
 
         with trange(1, desc='Training agent in real env') as t:
             for _ in t:
-                self.agent.learn(total_timesteps=6400)
+                self.agent.learn(6400)
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo'))
@@ -90,7 +75,7 @@ class SimPLe:
 
                     self.simulated_env.env_method('restart', initial_frames, initial_actions, indices=i)
 
-                self.agent.learn(total_timesteps=self.config.rollout_length * self.config.agents)
+                self.agent.learn(self.config.rollout_length * self.config.agents)
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo'))
@@ -105,9 +90,10 @@ class SimPLe:
         with trange(self.config.agent_evaluation_epochs, desc='Evaluating agent') as t:
             for _ in t:
                 obs = self.real_env.reset()
+                self.agent.init_eval()
                 cum_reward = 0
                 for _ in range(10000):
-                    action = self.agent.predict(obs)[0]
+                    action = self.agent.predict(obs)
                     obs, reward, done, _ = self.real_env.step(action, reduce_rewards=False)
                     if self.config.render_training:
                         self.real_env.render()
@@ -128,7 +114,7 @@ class SimPLe:
         )
         self.model.reward_estimator.load_state_dict(torch.load(os.path.join('models', 'reward_model.pt')))
         self.model.value_estimator.load_state_dict(torch.load(os.path.join('models', 'value_model.pt')))
-        self.agent = PPO2.load(os.path.join('models', 'ppo'))
+        self.agent = load(os.path.join('models', 'ppo'))
         self.real_env.buffer = np.load(os.path.join('models', 'buffer.npy'), allow_pickle=True)
 
     def train(self):
@@ -148,8 +134,9 @@ class SimPLe:
     def test(self):
         while True:
             observation = self.real_env.reset()
+            self.agent.init_eval()
             while True:
-                action = self.agent.predict(observation)[0]
+                action = self.agent.predict(observation)
                 observation, _, done, _ = self.real_env.step(action)
                 self.real_env.render()
                 time.sleep(1 / 60)
@@ -170,7 +157,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--done-on-final-rollout-step', default=False, action='store_true')
     parser.add_argument('--dropout', type=float, default=0.15)
-    parser.add_argument('--env-name', type=str, default='FreewayDeterministic-v4')
+    parser.add_argument('--env-name', type=str, default='Freeway')
     parser.add_argument('--experiment-name', type=str, default=strftime('%d-%m-%y-%H:%M:%S'))
     parser.add_argument('--filter-double-steps', type=int, default=3)
     parser.add_argument('--frame-shape', type=int, nargs=3, default=(3, 105, 80))
