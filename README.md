@@ -62,7 +62,7 @@ The most useful flags are described in the following table:
 | ---- | ----- | ------- | ----------- |
 | --agents | Any positive integer | 4 | The number of parallel environments to train the PPO agent on |
 | --device | Any string accepted by [torch.device](https://pytorch.org/docs/stable/tensor_attributes.html#device-doc) | cuda | Sets the PyTorch's device |
-| --env-name | Any string accepted by [gym.make](https://gym.openai.com/docs/#environments) | FreewayDeterministic-v4 | Sets the gym environment | 
+| --env-name | Any game name (without the suffixes) as depicted [here](https://gym.openai.com/envs/#atari) | Freeway | Sets the gym environment | 
 
 The following boolean flags are set to `False` if not passed to the command line:
 

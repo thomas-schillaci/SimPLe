@@ -119,7 +119,7 @@ class SimPLe:
 
     def train(self):
         self.train_agent_real_env()
-        # self.evaluate_agent()
+        self.evaluate_agent()
 
         for epoch in trange(15, desc='Epoch'):
             self.trainer.train(epoch, self.real_env)
