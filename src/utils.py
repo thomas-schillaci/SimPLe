@@ -1,5 +1,4 @@
 import torch
-import matplotlib.pyplot as plot
 import io
 import numpy as np
 from torch import nn as nn
@@ -125,19 +124,6 @@ def one_hot_encode(action, n, dtype=torch.uint8):
     res = res.view((*action.shape, n))
 
     return res
-
-
-# https://stackoverflow.com/questions/7821518/matplotlib-save-plot-to-numpy-array
-def plot_to_numpy(fig=None):
-    if fig is None:
-        fig = plot.gcf()
-    buffer = io.BytesIO()
-    fig.savefig(buffer, format='raw')
-    buffer.seek(0)
-    image = np.frombuffer(buffer.getvalue(), dtype=np.uint8)
-    image = image.reshape((int(fig.bbox.bounds[3]), int(fig.bbox.bounds[2]), -1))
-    buffer.close()
-    return image
 
 
 def bit_to_int(x_bit, num_bits):

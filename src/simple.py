@@ -6,10 +6,9 @@ from time import strftime
 import torch
 import numpy as np
 from tqdm import trange
-from baselines.common.vec_env import DummyVecEnv
 
 from ppo import PPO, load
-from subproc_vec_env import make_simulated_env, VecPytorchWrapper
+from subproc_vec_env import make_simulated_env
 from trainer import Trainer
 from atari_env import make_env
 from next_frame_predictor import NextFramePredictor
@@ -30,17 +29,11 @@ class SimPLe:
             wandb.init(project='msth', name=self.config.experiment_name, config=config)
             wandb.watch(self.model)
 
-    def set_agent_env(self, env):
-        assert env == self.real_env or env == self.simulated_env
-        if env == self.real_env:
-            self.agent.set_env(VecPytorchWrapper(DummyVecEnv([lambda: self.real_env])))
-        else:
-            self.agent.set_env(self.simulated_env)
-
     def train_agent_real_env(self):
-        self.real_env.set_recording(True)
-        self.real_env.new_epoch()
-        self.set_agent_env(self.real_env)
+        self.real_env.envs[0].set_recording(True)
+        self.real_env.envs[0].set_reduce_rewards(True)
+        self.real_env.envs[0].new_epoch()
+        self.agent.set_env(self.real_env)
 
         with trange(1, desc='Training agent in real env') as t:
             for _ in t:
@@ -48,7 +41,7 @@ class SimPLe:
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo'))
-            np.save(os.path.join('models', 'buffer.npy'), self.real_env.buffer)
+            np.save(os.path.join('models', 'buffer.npy'), self.real_env.envs[0].buffer)
 
     def train_agent_sim_env(self, epoch):
         z = 1
@@ -57,7 +50,7 @@ class SimPLe:
         if epoch == 14:
             z = 3
         n = 1000
-        self.set_agent_env(self.simulated_env)
+        self.agent.set_env(self.simulated_env)
 
         with trange(n * z, desc='Training agent in simulated env') as t:
             for _ in t:
@@ -66,9 +59,9 @@ class SimPLe:
                     # As using 16 agents requires resources, this condition accounts for this difference
                     test = float(torch.rand((1,))) < self.config.agents / 16
                     if i == self.config.agents - 1 and test:
-                        initial_frames, initial_actions = self.real_env.get_first_small_rollout()
+                        initial_frames, initial_actions = self.real_env.envs[0].get_first_small_rollout()
                     else:
-                        sequence, actions, _, _, _ = self.real_env.sample_buffer()
+                        sequence, actions, _, _, _ = self.real_env.envs[0].sample_buffer()
                         index = int(torch.randint(len(sequence) - self.config.stacking, (1,)))
                         initial_frames = sequence[index:index + self.config.stacking]
                         initial_actions = actions[index:index + self.config.stacking]
@@ -84,8 +77,9 @@ class SimPLe:
         if self.config.agent_evaluation_epochs < 1:
             return
 
-        self.real_env.set_recording(False)
-        self.set_agent_env(self.real_env)
+        self.real_env.envs[0].set_recording(False)
+        self.real_env.envs[0].set_reduce_rewards(False)
+        self.agent.set_env(self.real_env)
         cum_rewards = []
         with trange(self.config.agent_evaluation_epochs, desc='Evaluating agent') as t:
             for _ in t:
@@ -93,12 +87,13 @@ class SimPLe:
                 self.agent.init_eval()
                 cum_reward = 0
                 for _ in range(10000):
-                    action = self.agent.predict(obs)
-                    obs, reward, done, _ = self.real_env.step(action, reduce_rewards=False)
+                    obs = obs.to(self.config.device)
+                    action = self.agent.predict(obs)[0]
+                    obs, reward, done, _ = self.real_env.step(action)
                     if self.config.render_training:
                         self.real_env.render()
-                    cum_reward += reward
-                    if done:
+                    cum_reward += float(reward)
+                    if done[0]:
                         break
                 cum_rewards.append(cum_reward)
                 t.set_postfix({'cum_reward': np.mean(cum_rewards)})
@@ -115,14 +110,14 @@ class SimPLe:
         self.model.reward_estimator.load_state_dict(torch.load(os.path.join('models', 'reward_model.pt')))
         self.model.value_estimator.load_state_dict(torch.load(os.path.join('models', 'value_model.pt')))
         self.agent = load(os.path.join('models', 'ppo'))
-        self.real_env.buffer = np.load(os.path.join('models', 'buffer.npy'), allow_pickle=True)
+        self.real_env.envs[0].buffer = np.load(os.path.join('models', 'buffer.npy'), allow_pickle=True)
 
     def train(self):
         self.train_agent_real_env()
         self.evaluate_agent()
 
         for epoch in trange(15, desc='Epoch'):
-            self.trainer.train(epoch, self.real_env)
+            self.trainer.train(epoch, self.real_env.envs[0])
             self.train_agent_sim_env(epoch)
             self.evaluate_agent()
             self.train_agent_real_env()
@@ -131,7 +126,7 @@ class SimPLe:
         self.real_env.close()
         self.simulated_env.close()
 
-    def test(self):
+    def test(self):  # FIXME
         while True:
             observation = self.real_env.reset()
             self.agent.init_eval()

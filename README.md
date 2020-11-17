@@ -20,7 +20,7 @@ This program requires **python 3.7** and uses **CUDA 10.2** if enabled.
 
 - Run the following command to install the dependencies:
   ```shell script
-  pip install torch==1.6.0 torchvision==0.7.0 tqdm==4.49.0 numpy==1.16.4
+  pip install torch==1.6.0 torchvision==0.7.0 gym==0.15.7 gym[atari] opencv-python==4.4.0.42 tqdm==4.49.0 numpy==1.16.4
   
   git clone https://github.com/openai/baselines.git
   cd baselines

@@ -1,20 +1,27 @@
 import gym
 import torch
+from baselines.common import vec_env
 from baselines.common.atari_wrappers import make_atari, EpisodicLifeEnv, WarpFrame
+from baselines.common.vec_env import DummyVecEnv
 
 from a2c_ppo_acktr.envs import TransposeImage
 from utils import one_hot_encode
 
 
 class ClipRewardEnv(gym.Wrapper):
-    def __init__(self, env):
-        gym.Wrapper.__init__(self, env)
 
-    def step(self, action, reduce_rewards=False):
+    def __init__(self, env):
+        super().__init__(env)
+        self.reduce_rewards = True
+
+    def step(self, action):
         obs, reward, done, info = super().step(action)
-        if reduce_rewards:
+        if self.reduce_rewards:
             reward = (reward > 0) - (reward < 0)
         return obs, reward, done, info
+
+    def set_reduce_rewards(self, reduce_rewards):
+        self.reduce_rewards = reduce_rewards
 
 
 class RecorderEnv(gym.Wrapper):
@@ -150,6 +157,19 @@ class RecorderEnv(gym.Wrapper):
         return obs
 
 
+class VecPytorchWrapper(vec_env.VecEnvWrapper):
+
+    def reset(self):
+        obs = self.venv.reset()
+        return torch.tensor(obs)
+
+    def step_wait(self):
+        obs, reward, done, info = self.venv.step_wait()
+        obs = torch.tensor(obs)
+        reward = torch.tensor(reward).unsqueeze(1)
+        return obs, reward, done, info
+
+
 def make_env(config):
     env = make_atari(f'{config.env_name}NoFrameskip-v0', max_episode_steps=10000)
     env = EpisodicLifeEnv(env)
@@ -157,4 +177,6 @@ def make_env(config):
     env = TransposeImage(env)
     env = ClipRewardEnv(env)
     env = RecorderEnv(env, config)
+    env = DummyVecEnv([lambda: env])
+    env = VecPytorchWrapper(env)
     return env
