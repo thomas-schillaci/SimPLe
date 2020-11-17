@@ -7,7 +7,7 @@ import torch
 import numpy as np
 from tqdm import trange
 
-from ppo import PPO, load
+from ppo import PPO
 from subproc_vec_env import make_simulated_env
 from trainer import Trainer
 from atari_env import make_env
@@ -40,7 +40,7 @@ class SimPLe:
                 self.agent.learn(6400)
 
         if self.config.save_models:
-            self.agent.save(os.path.join('models', 'ppo'))
+            self.agent.save(os.path.join('models', 'ppo.pt'))
             np.save(os.path.join('models', 'buffer.npy'), self.real_env.envs[0].buffer)
 
     def train_agent_sim_env(self, epoch):
@@ -68,7 +68,8 @@ class SimPLe:
 
                     self.simulated_env.env_method('restart', initial_frames, initial_actions, indices=i)
 
-                self.agent.learn(self.config.rollout_length * self.config.agents)
+                losses = self.agent.learn(self.config.rollout_length * self.config.agents)
+                t.set_postfix(losses)
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo'))
@@ -109,7 +110,8 @@ class SimPLe:
         )
         self.model.reward_estimator.load_state_dict(torch.load(os.path.join('models', 'reward_model.pt')))
         self.model.value_estimator.load_state_dict(torch.load(os.path.join('models', 'value_model.pt')))
-        self.agent = load(os.path.join('models', 'ppo'))
+        self.agent = PPO(self.simulated_env, config, num_steps=self.config.rollout_length, num_mini_batch=5)
+        self.agent.load(os.path.join('models', 'ppo.pt'))
         self.real_env.envs[0].buffer = np.load(os.path.join('models', 'buffer.npy'), allow_pickle=True)
 
     def train(self):
@@ -126,16 +128,20 @@ class SimPLe:
         self.real_env.close()
         self.simulated_env.close()
 
-    def test(self):  # FIXME
+    def test(self):
+        self.real_env.envs[0].set_recording(False)
+        self.real_env.envs[0].set_reduce_rewards(False)
+        self.agent.set_env(self.real_env)
         while True:
             observation = self.real_env.reset()
             self.agent.init_eval()
             while True:
-                action = self.agent.predict(observation)
+                observation = observation.to(self.config.device)
+                action = self.agent.predict(observation)[0]
                 observation, _, done, _ = self.real_env.step(action)
                 self.real_env.render()
                 time.sleep(1 / 60)
-                if done:
+                if done[0]:
                     break
 
 

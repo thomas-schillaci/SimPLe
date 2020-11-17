@@ -64,8 +64,6 @@ class PPO:
         rollouts.to(self.config.device)
 
         for j in range(num_updates):
-            # utils.update_linear_schedule(self.agent.optimizer, j, num_updates, self.lr) # TODO
-
             for step in range(self.num_steps):
                 # Sample actions
                 with torch.no_grad():
@@ -100,15 +98,25 @@ class PPO:
                 ).detach()
 
             rollouts.compute_returns(next_value, True, self.config.ppo_gamma, 0.95, False)
-            value_loss, action_loss, dist_entropy = self.agent.update(rollouts)  # TODO return losses
+            value_loss, action_loss, dist_entropy = self.agent.update(rollouts)
             rollouts.after_update()
+
+            losses = {'ppo_value_loss': float(value_loss), 'ppo_action_loss': float(action_loss)}
+            if self.config.use_wandb:
+                import wandb
+                wandb.log(losses)
+
+        return losses
 
     def set_env(self, env):
         self.env = env
         self.num_processes = env.num_envs
 
-    def save(self, path):  # TODO implement me
-        pass
+    def save(self, path):
+        torch.save(self.actor_critic, path)
+
+    def load(self, path):
+        self.actor_critic = torch.load(path)
 
     def init_eval(self):
         self.eval_recurrent_hidden_states = torch.zeros(
@@ -128,8 +136,3 @@ class PPO:
             )
 
         return action
-
-
-# TODO implement me
-def load(path):
-    pass

@@ -1,8 +1,10 @@
 import gym
 import torch
+import torch.nn.functional as F
 from baselines.common import vec_env
-from baselines.common.atari_wrappers import make_atari, EpisodicLifeEnv, WarpFrame
+from baselines.common import atari_wrappers
 from baselines.common.vec_env import DummyVecEnv
+import numpy as np
 
 from a2c_ppo_acktr.envs import TransposeImage
 from utils import one_hot_encode
@@ -98,7 +100,7 @@ class RecorderEnv(gym.Wrapper):
         self.values = torch.empty((0,), dtype=torch.float32)
 
     def add_interaction(self, last_obs, action, obs, reward):
-        last_state = torch.tensor(last_obs, dtype=torch.uint8)
+        last_state = last_obs.clone().detach().byte()
         self.sequence = torch.cat((self.sequence, last_state.unsqueeze(0)))
         action = one_hot_encode(action, self.action_space.n)
         self.actions = torch.cat((self.actions, action))
@@ -116,7 +118,7 @@ class RecorderEnv(gym.Wrapper):
             reward = torch.tensor(reward, dtype=torch.uint8)
             self.rewards = torch.cat((self.rewards, reward.unsqueeze(0)))
 
-            target = torch.tensor(obs, dtype=torch.uint8)
+            target = obs.clone().detach().byte()
             self.targets = torch.cat((self.targets, target.unsqueeze(0)))
 
         if n == self.config.stacking + self.config.rollout_length - 1:
@@ -170,11 +172,31 @@ class VecPytorchWrapper(vec_env.VecEnvWrapper):
         return obs, reward, done, info
 
 
+class WarpFrame(gym.ObservationWrapper):
+
+    def __init__(self, env, config):
+        super().__init__(env)
+        self.config = config
+
+        self.observation_space = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=self.config.frame_shape,
+            dtype=np.uint8,
+        )
+
+    def observation(self, obs):
+        obs = torch.tensor(obs, dtype=torch.float32)
+        obs = obs.permute((2, 0, 1))
+        obs = F.interpolate(obs.unsqueeze(0), self.config.frame_shape[1:]).squeeze()
+        obs = obs.byte()
+        return obs
+
+
 def make_env(config):
-    env = make_atari(f'{config.env_name}NoFrameskip-v0', max_episode_steps=10000)
-    env = EpisodicLifeEnv(env)
-    env = WarpFrame(env, width=config.frame_shape[2], height=config.frame_shape[1], grayscale=False)
-    env = TransposeImage(env)
+    env = atari_wrappers.make_atari(f'{config.env_name}NoFrameskip-v0', max_episode_steps=10000)
+    env = atari_wrappers.EpisodicLifeEnv(env)
+    env = WarpFrame(env, config)
     env = ClipRewardEnv(env)
     env = RecorderEnv(env, config)
     env = DummyVecEnv([lambda: env])

@@ -10,15 +10,13 @@ Based on the paper [Model-Based Reinforcement Learning for Atari](https://arxiv.
 
 ![World model predictions on freeway](src/res/freeway_wm.gif)
 
-*SimPLe predicting 46 frames in the future from 4 initial frames on FreewayDeterministic-v4.*
+*SimPLe predicting 46 frames in the future from 4 initial frames on Freeway.*
 
 ## Installation
 
-This program requires **python 3.7** and uses **CUDA 10.2** if enabled.
+This program requires **python 3.7**, **CUDA 10.2** if enabled, and was tested on Ubuntu 20.04.1.
 
-### Using pip
-
-- Run the following command to install the dependencies:
+Run the following command to install the dependencies:
   ```shell script
   pip install torch==1.6.0 torchvision==0.7.0 gym==0.15.7 gym[atari] opencv-python==4.4.0.42 tqdm==4.49.0 numpy==1.16.4
   
@@ -26,10 +24,6 @@ This program requires **python 3.7** and uses **CUDA 10.2** if enabled.
   cd baselines
   pip install -e .
   ```
-
-### Using conda
-
-TODO
 
 ### Install wandb (optional)
 
@@ -87,9 +81,9 @@ The scores* obtained with this implementation are detailed in the following tabl
 
 | Environment | Score | Paper's score | % of reported score in the original paper |
 | ----------- | ---:  | ---:          | ---:                                      |
-| FreewayDeterministic-v4 | 20.3 | 20.3 | 100.0% |
-| KrullDeterministic-v4 | 3418.2 | 4539.9 | 82.6% |
-| KungFuMasterDeterministic-v4 | N/A | 17257.2 | N/A |
+| Freeway | 20.3 | 20.3 | 100.0% |
+| Krull | 3418.2 | 4539.9 | 82.6% |
+| KungFuMaster | N/A | 17257.2 | N/A |
 
 **Scores obtained on only one full training per environment. More numbers to come.*
 
@@ -98,4 +92,3 @@ The scores* obtained with this implementation are detailed in the following tabl
 - Using CUDA, training the agent and the models takes ~50h on a Nvidia GTX 1070 GPU
 - Training the PPO agents on 4 agents requires 16Gb of RAM. If your machine runs out of memory, consider reducing the number of agents by passing the `--agents` flag 
 - **In the original paper, 16 parallel agents are used. Use the flag** `--agents 16` **to replicate this.**
-- This program was tested on Ubuntu 20.04.1 LTS
