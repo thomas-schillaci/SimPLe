@@ -11,7 +11,7 @@ from tqdm import trange
 from ppo import PPO
 from subproc_vec_env import make_simulated_env
 from trainer import Trainer
-from atari_env import make_env
+from atari_env import make_env, make_eval_env
 from next_frame_predictor import NextFramePredictor
 
 
@@ -39,8 +39,6 @@ class SimPLe:
             wandb.watch(self.model)
 
     def train_agent_real_env(self):
-        self.real_env.envs[0].set_recording(True)
-        self.real_env.envs[0].set_reduce_rewards(True)
         self.real_env.envs[0].new_epoch()
         self.agent.set_env(self.real_env)
 
@@ -83,19 +81,18 @@ class SimPLe:
         if self.config.agent_evaluation_epochs < 1:
             return
 
-        self.real_env.envs[0].set_recording(False)
-        self.real_env.envs[0].set_reduce_rewards(False)
-        self.agent.set_env(self.real_env)
+        env = make_eval_env(self.config)
+        self.agent.set_env(env)
         cum_rewards = []
         with trange(self.config.agent_evaluation_epochs, desc='Evaluating agent') as t:
             for _ in t:
-                obs = self.real_env.reset()
+                obs = env.reset()
                 self.agent.init_eval()
                 cum_reward = 0
                 for _ in range(10000):
                     obs = obs.to(self.config.device)
                     action = self.agent.predict(obs)[0]
-                    obs, reward, done, _ = self.real_env.step(action)
+                    obs, reward, done, _ = env.step(action)
                     if self.config.render_training:
                         self.real_env.render()
                     cum_reward += float(reward)
@@ -141,17 +138,15 @@ class SimPLe:
         self.simulated_env.close()
 
     def test(self):
-        self.real_env.envs[0].set_recording(False)
-        self.real_env.envs[0].set_reduce_rewards(False)
-        self.agent.set_env(self.real_env)
+        env = make_eval_env(self.config)
+        self.agent.set_env(env)
         while True:
-            observation = self.real_env.reset()
+            observation = env.reset()
             self.agent.init_eval()
             while True:
                 observation = observation.to(self.config.device)
                 action = self.agent.predict(observation)[0]
-                observation, _, done, _ = self.real_env.step(action)
-                self.real_env.render()
+                observation, _, done, _ = env.step(action)
                 time.sleep(1 / 60)
                 if done[0]:
                     break
@@ -183,6 +178,7 @@ if __name__ == '__main__':
     parser.add_argument('--ppo-gamma', type=float, default=0.99)
     parser.add_argument('--ppo-lr', type=float, default=1e-4)
     parser.add_argument('--recurrent-state-size', type=int, default=64)
+    parser.add_argument('--render-evaluation', default=False, action='store_true')
     parser.add_argument('--render-training', default=False, action='store_true')
     parser.add_argument('--residual-dropout', type=float, default=0.5)
     parser.add_argument('--reward-model-batch-size', type=int, default=16)

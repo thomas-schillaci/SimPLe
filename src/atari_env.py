@@ -9,28 +9,11 @@ import numpy as np
 from utils import one_hot_encode
 
 
-class ClipRewardEnv(gym.Wrapper):
-
-    def __init__(self, env):
-        super().__init__(env)
-        self.reduce_rewards = True
-
-    def step(self, action):
-        obs, reward, done, info = super().step(action)
-        if self.reduce_rewards:
-            reward = (reward > 0) - (reward < 0)
-        return obs, reward, done, info
-
-    def set_reduce_rewards(self, reduce_rewards):
-        self.reduce_rewards = reduce_rewards
-
-
 class RecorderEnv(gym.Wrapper):
 
     def __init__(self, env, config):
         super().__init__(env)
         self.config = config
-        self.recording = True
         self.buffer = []
 
         self.last_obs = None
@@ -47,9 +30,6 @@ class RecorderEnv(gym.Wrapper):
 
         self.initial_frames = None
         self.initial_actions = None
-
-    def set_recording(self, recording):
-        self.recording = recording
 
     def sample_buffer(self, batch_size=-1):
         if not self.buffer:
@@ -127,26 +107,22 @@ class RecorderEnv(gym.Wrapper):
     def step(self, action):
         obs, reward, done, info = super().step(action)
 
-        if self.config.render_training:
-            self.render()
+        self.add_interaction(self.last_obs, action, obs, reward)
 
-        if self.recording:
-            self.add_interaction(self.last_obs, action, obs, reward)
+        if done:
+            for _ in range(len(self.rewards)):
+                self.current_rewards.pop()
+            self.reset_sartv()
+            value = 0
+            for i in range(len(self.buffer) - 1, -1, -1):
+                if self.buffer[i][-1] is not None:
+                    break
+                self.buffer[i][-1] = torch.empty((self.config.rollout_length,), dtype=torch.float32)
+                for j in range(self.config.rollout_length - 1, -1, -1):
+                    value = self.current_rewards.pop() + self.config.ppo_gamma * value
+                    self.buffer[i][-1][j] = value
 
-            if done:
-                for _ in range(len(self.rewards)):
-                    self.current_rewards.pop()
-                self.reset_sartv()
-                value = 0
-                for i in range(len(self.buffer) - 1, -1, -1):
-                    if self.buffer[i][-1] is not None:
-                        break
-                    self.buffer[i][-1] = torch.empty((self.config.rollout_length,), dtype=torch.float32)
-                    for j in range(self.config.rollout_length - 1, -1, -1):
-                        value = self.current_rewards.pop() + self.config.ppo_gamma * value
-                        self.buffer[i][-1][j] = value
-
-                assert not self.current_rewards
+            assert not self.current_rewards
 
         self.last_obs = obs
 
@@ -192,12 +168,31 @@ class WarpFrame(gym.ObservationWrapper):
         return obs
 
 
+class RenderingEnv(gym.ObservationWrapper):
+
+    def observation(self, observation):
+        self.render()
+        return observation
+
+
 def make_env(config):
     env = atari_wrappers.make_atari(f'{config.env_name}NoFrameskip-v0', max_episode_steps=10000)
     env = atari_wrappers.EpisodicLifeEnv(env)
     env = WarpFrame(env, config)
-    env = ClipRewardEnv(env)
+    env = atari_wrappers.ClipRewardEnv(env)
+    if config.render_training:
+        env = RenderingEnv(env)
     env = RecorderEnv(env, config)
+    env = DummyVecEnv([lambda: env])
+    env = VecPytorchWrapper(env)
+    return env
+
+
+def make_eval_env(config):
+    env = atari_wrappers.make_atari(f'{config.env_name}NoFrameskip-v0', max_episode_steps=10000)
+    env = WarpFrame(env, config)
+    if config.render_evaluation:
+        env = RenderingEnv(env)
     env = DummyVecEnv([lambda: env])
     env = VecPytorchWrapper(env)
     return env

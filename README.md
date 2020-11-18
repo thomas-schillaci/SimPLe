@@ -63,6 +63,7 @@ The following boolean flags are set to `False` if not passed to the command line
 | Flag | Description |
 | ---- | ----------- |
 | --load-models | Loads models from `src/models/` and bypasses training |
+| --render-evaluation | Renders the environments during evaluation |
 | --render-training | Renders the environments during training |
 | --save-models | Save the models after each epoch |
 | --use-wandb | Enables [wandb](https://www.wandb.com/) to track the experiment |
