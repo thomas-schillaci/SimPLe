@@ -52,5 +52,5 @@ class SimulatedEnv(Env):
         self.initial_actions = initial_actions
 
 
-def __make_simulated_env(config, action_space, main=False):
+def _make_simulated_env(config, action_space, main=False):
     return SimulatedEnv(config, action_space, main)

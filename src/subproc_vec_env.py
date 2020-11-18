@@ -10,7 +10,7 @@ from baselines.common.vec_env import VecEnvWrapper
 from cloudpickle import cloudpickle
 
 from atari_env import VecPytorchWrapper
-from simulated_env import __make_simulated_env
+from simulated_env import _make_simulated_env
 from utils import one_hot_encode
 
 import multiprocessing
@@ -448,7 +448,7 @@ class SubprocVecEnv(_SubprocVecEnv):
 
 
 def make_simulated_env(config, model, action_space):
-    constructor = lambda i: (lambda: __make_simulated_env(config, action_space, i == 0))
+    constructor = lambda i: (lambda: _make_simulated_env(config, action_space, i == 0))
     env = SubprocVecEnv([constructor(i) for i in range(config.agents)], model, action_space.n, config)
     env = VecPytorchWrapper(env)
     return env

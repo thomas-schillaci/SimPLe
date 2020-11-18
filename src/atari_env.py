@@ -149,21 +149,23 @@ class VecPytorchWrapper(vec_env.VecEnvWrapper):
 
 class WarpFrame(gym.ObservationWrapper):
 
-    def __init__(self, env, config):
+    def __init__(self, env, width=80, height=105):
         super().__init__(env)
-        self.config = config
+        self.width = width
+        self.height = height
+        channels = env.observation_space.shape[-1]
 
         self.observation_space = gym.spaces.Box(
             low=0,
             high=255,
-            shape=self.config.frame_shape,
+            shape=(channels, self.height, self.width),
             dtype=np.uint8,
         )
 
     def observation(self, obs):
         obs = torch.tensor(obs, dtype=torch.float32)
         obs = obs.permute((2, 0, 1))
-        obs = F.interpolate(obs.unsqueeze(0), self.config.frame_shape[1:]).squeeze()
+        obs = F.interpolate(obs.unsqueeze(0), (self.height, self.width)).squeeze()
         obs = obs.byte()
         return obs
 
@@ -175,24 +177,22 @@ class RenderingEnv(gym.ObservationWrapper):
         return observation
 
 
-def make_env(config):
-    env = atari_wrappers.make_atari(f'{config.env_name}NoFrameskip-v0', max_episode_steps=10000)
+def make_env(config, render, reduce_rewards=True, record=True):
+    env = atari_wrappers.make_atari(f'{config.env_name}NoFrameskip-v4', max_episode_steps=10000)
     env = atari_wrappers.EpisodicLifeEnv(env)
-    env = WarpFrame(env, config)
-    env = atari_wrappers.ClipRewardEnv(env)
-    if config.render_training:
+    if 'FIRE' in env.unwrapped.get_action_meanings():
+        env = atari_wrappers.FireResetEnv(env)
+    env = WarpFrame(env)
+    if reduce_rewards:
+        env = atari_wrappers.ClipRewardEnv(env)
+    if render:
         env = RenderingEnv(env)
-    env = RecorderEnv(env, config)
+    if record:
+        env = RecorderEnv(env, config)
     env = DummyVecEnv([lambda: env])
     env = VecPytorchWrapper(env)
     return env
 
 
-def make_eval_env(config):
-    env = atari_wrappers.make_atari(f'{config.env_name}NoFrameskip-v0', max_episode_steps=10000)
-    env = WarpFrame(env, config)
-    if config.render_evaluation:
-        env = RenderingEnv(env)
-    env = DummyVecEnv([lambda: env])
-    env = VecPytorchWrapper(env)
-    return env
+def make_eval_env(config, render):
+    return make_env(config, render, reduce_rewards=False, record=False)

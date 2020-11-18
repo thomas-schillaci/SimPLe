@@ -19,7 +19,7 @@ class SimPLe:
 
     def __init__(self, config):
         self.config = config
-        self.real_env = make_env(config)
+        self.real_env = make_env(config, config.render_training)
         self.model = NextFramePredictor(config, self.real_env.action_space.n).to(config.device)
         self.trainer = Trainer(self.model, config)
         self.simulated_env = make_simulated_env(config, self.model, self.real_env.action_space)
@@ -81,7 +81,7 @@ class SimPLe:
         if self.config.agent_evaluation_epochs < 1:
             return
 
-        env = make_eval_env(self.config)
+        env = make_eval_env(self.config, self.config.render_training)
         self.agent.set_env(env)
         cum_rewards = []
         with trange(self.config.agent_evaluation_epochs, desc='Evaluating agent') as t:
@@ -138,7 +138,7 @@ class SimPLe:
         self.simulated_env.close()
 
     def test(self):
-        env = make_eval_env(self.config)
+        env = make_eval_env(self.config, self.config.render_evaluation)
         self.agent.set_env(env)
         while True:
             observation = env.reset()
@@ -161,9 +161,9 @@ if __name__ == '__main__':
     parser.add_argument('--bottleneck-noise', type=float, default=0.1)
     parser.add_argument('--clip-grad-norm', type=float, default=1.0)
     parser.add_argument('--compress-steps', type=int, default=5)
-    parser.add_argument('--decouple-optimizers', default=False, action='store_true')
+    parser.add_argument('--decouple-optimizers', default=False, action='store_true')  # TODO benchmark me
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--done-on-final-rollout-step', default=False, action='store_true')
+    parser.add_argument('--done-on-final-rollout-step', default=True, action='store_false')  # TODO benchmark me
     parser.add_argument('--dropout', type=float, default=0.15)
     parser.add_argument('--env-name', type=str, default='Freeway')
     parser.add_argument('--experiment-name', type=str, default=strftime('%d-%m-%y-%H:%M:%S'))
@@ -184,7 +184,7 @@ if __name__ == '__main__':
     parser.add_argument('--reward-model-batch-size', type=int, default=16)
     parser.add_argument('--rollout-length', type=int, default=50)
     parser.add_argument('--save-models', default=False, action='store_true')
-    parser.add_argument('--scheduled-sampling-decay-steps', type=int, default=22250)
+    parser.add_argument('--scheduled-sampling-decay-steps', type=int, default=22250)  # TODO benchmark me vs 40000
     parser.add_argument('--stacking', type=float, default=4)
     parser.add_argument('--target-loss-clipping', type=float, default=0.03)
     parser.add_argument('--use-wandb', default=False, action='store_true')
