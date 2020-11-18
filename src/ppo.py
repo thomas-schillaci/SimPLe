@@ -67,6 +67,8 @@ class PPO:
         rollouts.obs[0].copy_(obs)
         rollouts.to(self.device)
 
+        losses = {}
+
         for j in range(num_updates):
             for step in range(self.num_steps):
                 # Sample actions

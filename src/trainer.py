@@ -72,6 +72,10 @@ class Trainer:
                     self.model.stochastic_model.bits_predictor.state_dict(),
                     os.path.join('models', 'bits_predictor.pt')
                 )
+                torch.save(
+                    self.model.value_estimator.state_dict(),
+                    os.path.join('models', 'value_model.pt')
+                )
 
     def train_world_model_impl(self, sequences, actions, targets, values, epsilon=0.0):
         assert sequences.dtype == torch.uint8
@@ -125,8 +129,8 @@ class Trainer:
             loss = nn.CrossEntropyLoss(reduction='none')(frames_pred, target)
             clip = torch.tensor(self.config.target_loss_clipping).to(self.config.device)
             loss = torch.max(loss, clip)
-            offset = self.config.target_loss_clipping * self.config.frame_shape[0] \
-                     * self.config.frame_shape[1] * self.config.frame_shape[2]
+            offset = self.config.target_loss_clipping * self.config.frame_shape[0] * self.config.frame_shape[1] \
+                     * self.config.frame_shape[2]
             loss = loss.sum() / self.config.batch_size - offset
 
             if self.config.decouple_optimizers:
@@ -236,8 +240,8 @@ class Trainer:
                             reward = b_rewards[j]
                             if int(reward) == i:
                                 frames = torch.cat(
-                                    (frames, sequence[j:j + self.config.stacking].unsqueeze(1))
-                                    , dim=1
+                                    (frames, sequence[j:j + self.config.stacking].unsqueeze(1)),
+                                    dim=1
                                 )
                                 actions = torch.cat(
                                     (actions, b_actions[j:j + self.config.stacking].unsqueeze(1)),
@@ -268,6 +272,7 @@ class Trainer:
         rewards = rewards.long()
 
         batch_size = self.config.reward_model_batch_size
+        loss = None
         for i in range(len(rewards) // batch_size):
             frame = frames[:, i * batch_size:(i + 1) * batch_size].to(self.config.device)
             action = actions[:, i * batch_size:(i + 1) * batch_size].to(self.config.device)

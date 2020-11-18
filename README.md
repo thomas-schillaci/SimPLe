@@ -1,12 +1,12 @@
 # SimPLe PyTorch
 
-Unofficial PyTorch implementation of the SimPLe algorithm for the Arcade Learning Environment's Atari 2600 games.
+PyTorch implementation of the *SimPLe* algorithm for the Arcade Learning Environment's Atari 2600 games.
 
 Based on the paper [Model-Based Reinforcement Learning for Atari](https://arxiv.org/abs/1903.00374).
 
 - [Installation](#installation)
 - [How to use](#how-to-use)
-- [Stats](#stats)
+- [Per-environment performance](#per-environment-performance)
 
 ![World model predictions on freeway](src/res/freeway_wm.gif)
 
@@ -18,7 +18,7 @@ This program uses **python 3.7**, **CUDA 10.2** if enabled, and was tested on Ub
 
 Run the following command to install the dependencies:
   ```shell script
-  pip install torch==1.7.0 torchvision==0.8.1 gym==0.15.7 gym[atari] opencv-python==4.4.0.42 tqdm==4.49.0 numpy==1.16.4
+  pip install torch==1.7.0 gym==0.15.7 gym[atari] opencv-python==4.4.0.42 tqdm==4.49.0 numpy==1.16.4
   
   git clone https://github.com/openai/baselines.git
   cd baselines
@@ -72,7 +72,7 @@ For example, to run the program without CUDA and to render the environments duri
 python simple.py --device cpu --render-training
 ```
 
-## Per environment performance
+## Per-environment performance
 
 The scores* obtained with this implementation are detailed in the following table:
 

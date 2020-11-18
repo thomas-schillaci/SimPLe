@@ -6,7 +6,6 @@ from baselines.common import atari_wrappers
 from baselines.common.vec_env import DummyVecEnv
 import numpy as np
 
-from a2c_ppo_acktr.envs import TransposeImage
 from utils import one_hot_encode
 
 

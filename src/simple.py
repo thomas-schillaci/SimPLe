@@ -2,6 +2,7 @@ import os
 import time
 import argparse
 from time import strftime
+from warnings import warn
 
 import torch
 import numpy as np
@@ -49,7 +50,6 @@ class SimPLe:
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo.pt'))
-            np.save(os.path.join('models', 'buffer.npy'), self.real_env.envs[0].buffer)
 
     def train_agent_sim_env(self, epoch):
         z = 1
@@ -77,7 +77,7 @@ class SimPLe:
                 t.set_postfix(losses)
 
         if self.config.save_models:
-            self.agent.save(os.path.join('models', 'ppo'))
+            self.agent.save(os.path.join('models', 'ppo.pt'))
 
     def evaluate_agent(self):
         if self.config.agent_evaluation_epochs < 1:
@@ -110,17 +110,24 @@ class SimPLe:
 
     def load_models(self):
         self.model.load_state_dict(torch.load(os.path.join('models', 'model.pt')))
-        self.model.stochastic_model.bits_predictor.load_state_dict(
-            torch.load(os.path.join('models', 'bits_predictor.pt'))
-        )
-        self.model.reward_estimator.load_state_dict(torch.load(os.path.join('models', 'reward_model.pt')))
-        self.model.value_estimator.load_state_dict(torch.load(os.path.join('models', 'value_model.pt')))
+        if self.model.decouple_optimizers:  # FIXME
+            self.model.stochastic_model.bits_predictor.load_state_dict(
+                torch.load(os.path.join('models', 'bits_predictor.pt'))
+            )
+            self.model.reward_estimator.load_state_dict(torch.load(os.path.join('models', 'reward_model.pt')))
+            self.model.value_estimator.load_state_dict(torch.load(os.path.join('models', 'value_model.pt')))
         self.agent = PPO(self.simulated_env, config, num_steps=self.config.rollout_length, num_mini_batch=5)
         self.agent.load(os.path.join('models', 'ppo.pt'))
-        self.real_env.envs[0].buffer = np.load(os.path.join('models', 'buffer.npy'), allow_pickle=True)
 
     def train(self):
         self.train_agent_real_env()
+        if not self.real_env.envs[0].buffer:
+            self.__init__(self.config)
+            warn('The agent was not able to collect even one full rollout in the real environment.\n'
+                 'Restarting the training.\n'
+                 'If this happens continuously, consider improving the agent, reducing the rollout length,'
+                 'or changing the environment.')
+            return self.train()
         self.evaluate_agent()
 
         for epoch in trange(15, desc='Epoch'):
