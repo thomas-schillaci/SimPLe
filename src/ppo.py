@@ -9,8 +9,9 @@ class PPO:
 
     def __init__(self,
                  env,
-                 config,
+                 device,
                  num_steps=128,
+                 gamma=0.99,
                  lr=2.5e-4,
                  clip_param=0.1,
                  value_loss_coef=0.5,
@@ -18,21 +19,24 @@ class PPO:
                  entropy_coef=0.01,
                  eps=1e-5,
                  max_grad_norm=0.5,
-                 ppo_epoch=4
+                 ppo_epoch=4,
+                 use_wandb=False
                  ):
 
         self.env = env
-        self.config = config
+        self.device = device
+        self.gamma = gamma
         self.lr = lr
         self.num_steps = num_steps
         self.num_processes = self.env.num_envs
+        self.use_wandb = use_wandb
 
         self.actor_critic = Policy(
             self.env.observation_space.shape,
             self.env.action_space,
             base_kwargs={'recurrent': False}
         )
-        self.actor_critic.to(config.device)
+        self.actor_critic.to(self.device)
 
         self.agent = ppo.PPO(
             self.actor_critic,
@@ -61,7 +65,7 @@ class PPO:
 
         obs = self.env.reset()
         rollouts.obs[0].copy_(obs)
-        rollouts.to(self.config.device)
+        rollouts.to(self.device)
 
         for j in range(num_updates):
             for step in range(self.num_steps):
@@ -97,12 +101,12 @@ class PPO:
                     rollouts.masks[-1]
                 ).detach()
 
-            rollouts.compute_returns(next_value, True, self.config.ppo_gamma, 0.95, False)
+            rollouts.compute_returns(next_value, True, self.gamma, 0.95, False)
             value_loss, action_loss, dist_entropy = self.agent.update(rollouts)
             rollouts.after_update()
 
             losses = {'ppo_value_loss': float(value_loss), 'ppo_action_loss': float(action_loss)}
-            if self.config.use_wandb:
+            if self.use_wandb:
                 import wandb
                 wandb.log(losses)
 
@@ -122,7 +126,7 @@ class PPO:
         self.eval_recurrent_hidden_states = torch.zeros(
             self.num_processes,
             self.actor_critic.recurrent_hidden_state_size,
-            device=self.config.device
+            device=self.device
         )
 
     def predict(self, obs):
@@ -131,7 +135,7 @@ class PPO:
             _, action, _, self.eval_recurrent_hidden_states = self.actor_critic.act(
                 obs,
                 self.eval_recurrent_hidden_states,
-                torch.zeros(self.num_processes, 1, device=self.config.device),
+                torch.zeros(self.num_processes, 1, device=self.device),
                 deterministic=True
             )
 

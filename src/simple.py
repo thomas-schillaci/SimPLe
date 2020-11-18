@@ -22,7 +22,15 @@ class SimPLe:
         self.model = NextFramePredictor(config, self.real_env.action_space.n).to(config.device)
         self.trainer = Trainer(self.model, config)
         self.simulated_env = make_simulated_env(config, self.model, self.real_env.action_space)
-        self.agent = PPO(self.simulated_env, config, num_steps=self.config.rollout_length, num_mini_batch=5)
+        self.agent = PPO(
+            self.simulated_env,
+            config.device,
+            gamma=config.ppo_gamma,
+            use_wandb=config.use_wandb,
+            num_steps=self.config.rollout_length,
+            num_mini_batch=5,
+            lr=config.ppo_lr
+        )
 
         if self.config.use_wandb:
             import wandb
@@ -55,10 +63,7 @@ class SimPLe:
         with trange(n * z, desc='Training agent in simulated env') as t:
             for _ in t:
                 for i in range(self.config.agents):
-                    # In the original paper, 1 agent out of 16 is trained on a deterministic start
-                    # As using 16 agents requires resources, this condition accounts for this difference
-                    test = float(torch.rand((1,))) < self.config.agents / 16
-                    if i == self.config.agents - 1 and test:
+                    if i == self.config.agents - 1:
                         initial_frames, initial_actions = self.real_env.envs[0].get_first_small_rollout()
                     else:
                         sequence, actions, _, _, _ = self.real_env.envs[0].sample_buffer()
@@ -147,7 +152,7 @@ class SimPLe:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--agents', type=int, default=4)
+    parser.add_argument('--agents', type=int, default=16)
     parser.add_argument('--agent-evaluation-epochs', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=4)
     parser.add_argument('--bottleneck-bits', type=int, default=128)
@@ -169,6 +174,7 @@ if __name__ == '__main__':
     parser.add_argument('--latent-use-max-probability', type=float, default=0.8)
     parser.add_argument('--load-models', default=False, action='store_true')
     parser.add_argument('--ppo-gamma', type=float, default=0.99)
+    parser.add_argument('--ppo-lr', type=float, default=1e-4)
     parser.add_argument('--recurrent-state-size', type=int, default=64)
     parser.add_argument('--render-training', default=False, action='store_true')
     parser.add_argument('--residual-dropout', type=float, default=0.5)

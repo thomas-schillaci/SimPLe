@@ -15,19 +15,11 @@ class Trainer:
         self.config = config
         self.model = model
 
+        self.optimizer = Adafactor(self.model.parameters())
+        self.reward_optimizer = Adafactor(self.model.reward_estimator.parameters())
         if self.config.decouple_optimizers:
-            self.optimizer = None
-            self.optimizers = [
-                Adafactor(self.model.parameters())
-            ]
-            self.optimizers.append(Adafactor(self.model.stochastic_model.bits_predictor.parameters()))
-            self.reward_optimizer = Adafactor(self.model.reward_estimator.parameters())
+            self.lstm_optimizer = Adafactor(self.model.stochastic_model.bits_predictor.parameters())
             self.value_optimizer = Adafactor(self.model.value_estimator.parameters())
-        else:
-            self.optimizer = Adafactor(self.model.parameters())
-            self.optimizers = None
-            self.reward_optimizer = None
-            self.value_optimizer = None
 
         self.model_step = 1
         self.reward_step = 1
@@ -35,9 +27,7 @@ class Trainer:
 
     def train(self, epoch, real_env):
         self.train_world_model(epoch, real_env.sample_buffer)
-        if self.config.decouple_optimizers:
-            self.train_reward_model(epoch, real_env)
-            self.train_value_model(epoch, real_env.sample_buffer)
+        self.train_reward_model(epoch, real_env)
 
     def train_world_model(self, epoch, sample_buffer):
         self.model.train()
@@ -69,8 +59,8 @@ class Trainer:
                 else:
                     epsilon = 0
 
-                sequences, actions, rewards, targets, values = sample_buffer(self.config.batch_size)
-                losses = self.train_world_model_impl(sequences, actions, rewards, targets, values, epsilon)
+                sequences, actions, _, targets, values = sample_buffer(self.config.batch_size)
+                losses = self.train_world_model_impl(sequences, actions, targets, values, epsilon)
                 losses = {key: format(losses[key], '.4e') for key in losses.keys()}
                 t.set_postfix(losses)
 
@@ -83,22 +73,19 @@ class Trainer:
                     os.path.join('models', 'bits_predictor.pt')
                 )
 
-    def train_world_model_impl(self, sequences, actions, rewards, targets, values, epsilon=0.0):
+    def train_world_model_impl(self, sequences, actions, targets, values, epsilon=0.0):
         assert sequences.dtype == torch.uint8
         assert actions.dtype == torch.uint8
-        assert rewards.dtype == torch.uint8
         assert targets.dtype == torch.uint8
         assert values.dtype == torch.float32
 
         sequences = sequences.to(self.config.device)
         actions = actions.to(self.config.device)
-        rewards = rewards.to(self.config.device)
         targets = targets.to(self.config.device)
         values = values.to(self.config.device)
 
         sequences = sequences.float() / 255
         actions = actions.float()
-        rewards = rewards.long()
         targets = targets.long()
 
         initial_frames = sequences[:self.config.stacking]
@@ -109,19 +96,16 @@ class Trainer:
         warmup_loss = self.model.warmup(initial_frames, initial_actions)
 
         if self.config.decouple_optimizers:
-            self.optimizers[0].zero_grad()
+            self.optimizer.zero_grad()
             warmup_loss.backward()
             clip_grad_norm_(self.model.parameters(), self.config.clip_grad_norm)
-            self.optimizers[0].step()
+            self.optimizer.step()
 
         sequences = sequences[self.config.stacking - 1:]
         actions = actions[self.config.stacking - 1:]
 
         frames_pred = None
-        if self.config.decouple_optimizers:
-            float_losses = torch.empty((self.config.rollout_length, 2))
-        else:
-            float_losses = torch.empty((self.config.rollout_length, 4))
+        losses = torch.empty((self.config.rollout_length, 3))
 
         for i in range(self.config.rollout_length):
             frames = torch.empty_like(sequences[0]).to(self.config.device)
@@ -132,12 +116,11 @@ class Trainer:
                     frames[j] = torch.argmax(frames_pred[j], dim=0).float() / 255
 
             action = actions[i]
-            reward = rewards[i]
             target = targets[i]
             target_input = target.float() / 255
             value = values[i]
 
-            frames_pred, rewards_pred, values_pred = self.model(frames, action, target_input, epsilon)
+            frames_pred, _, values_pred = self.model(frames, action, target_input, epsilon)
 
             loss = nn.CrossEntropyLoss(reduction='none')(frames_pred, target)
             clip = torch.tensor(self.config.target_loss_clipping).to(self.config.device)
@@ -147,48 +130,41 @@ class Trainer:
             loss = loss.sum() / self.config.batch_size - offset
 
             if self.config.decouple_optimizers:
-                self.optimizers[0].zero_grad()
+                self.optimizer.zero_grad()
                 loss.backward(retain_graph=True)
                 clip_grad_norm_(self.model.parameters(), self.config.clip_grad_norm)
-                self.optimizers[0].step()
+                self.optimizer.step()
 
-                float_losses[i, 0] = float(loss)
-
-                loss = self.model.stochastic_model.get_lstm_loss()
-
-                self.optimizers[1].zero_grad()
-                loss.backward()
+                lstm_loss = self.model.stochastic_model.get_lstm_loss()
+                self.lstm_optimizer.zero_grad()
+                lstm_loss.backward(retain_graph=True)
                 clip_grad_norm_(self.model.stochastic_model.bits_predictor.parameters(), self.config.clip_grad_norm)
-                self.optimizers[1].step()
+                self.lstm_optimizer.step()
 
-                float_losses[i, 1] = float(loss)
+                value_loss = nn.MSELoss()(values_pred, value)
+                self.value_optimizer.zero_grad()
+                value_loss.backward()
+                clip_grad_norm_(self.model.value_estimator.parameters(), self.config.clip_grad_norm)
+                self.value_optimizer.step()
             else:
                 lstm_loss = self.model.stochastic_model.get_lstm_loss()
-                reward_loss = nn.CrossEntropyLoss()(rewards_pred, reward)
                 value_loss = nn.MSELoss()(values_pred, value)
-
-                loss = loss + lstm_loss + reward_loss + value_loss
+                loss = loss + lstm_loss + value_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 clip_grad_norm_(self.model.parameters(), self.config.clip_grad_norm)
                 self.optimizer.step()
 
-                float_losses[i] = torch.tensor([float(loss), float(lstm_loss), float(reward_loss), float(value_loss)])
+            losses[i] = torch.tensor([float(loss), float(lstm_loss), float(value_loss)])
 
-        float_losses = torch.mean(float_losses, dim=0)
-
+        losses = torch.mean(losses, dim=0)
         losses = {
             'loss_warmup': float(warmup_loss),
-            'loss_reconstruct': float(float_losses[0]),
-            'loss_lstm': float(float_losses[1])
+            'loss_reconstruct': float(losses[0]),
+            'loss_lstm': float(losses[1]),
+            'loss_value': float(losses[2]),
         }
-
-        if not self.config.decouple_optimizers:
-            losses.update({
-                'loss_reward': float(float_losses[2]),
-                'loss_value': float(float_losses[3]),
-            })
 
         if self.config.use_wandb:
             import wandb
@@ -315,78 +291,3 @@ class Trainer:
         del frames, actions, rewards
 
         return float(loss)
-
-    def train_value_model(self, epoch, sample_buffer):
-        self.model.eval()
-        self.model.value_estimator.train()
-
-        steps = 4000
-
-        if epoch == 0:
-            steps *= 3
-
-        with trange(
-                0,
-                steps,
-                self.config.rollout_length,
-                desc='Training value model',
-                unit_scale=self.config.rollout_length
-        ) as t:
-            for _ in t:
-                sequences, actions, _, _, values = sample_buffer(self.config.value_model_batch_size)
-                loss = self.train_value_model_impl(sequences, actions, values)
-                loss = format(loss, '.4e')
-                t.set_postfix({'loss_value': loss})
-
-        empty_cache()
-        if self.config.save_models:
-            torch.save(self.model.value_estimator.state_dict(), os.path.join('models', 'value_model.pt'))
-
-    def train_value_model_impl(self, sequences, actions, values):
-        assert sequences.dtype == torch.uint8
-        assert actions.dtype == torch.uint8
-        assert values.dtype == torch.float32
-        sequences = sequences.to(self.config.device)
-        actions = actions.to(self.config.device)
-        values = values.to(self.config.device)
-
-        sequences = sequences.float() / 255
-        actions = actions.float()
-
-        initial_frames = sequences[:self.config.stacking]
-        initial_frames = initial_frames.view(
-            (self.config.stacking, self.config.value_model_batch_size, *self.config.frame_shape))
-        initial_actions = actions[:self.config.stacking - 1]
-        initial_actions = initial_actions.view((self.config.stacking - 1, self.config.value_model_batch_size, -1))
-        self.model.warmup(initial_frames, initial_actions)
-
-        sequences = sequences[self.config.stacking - 1:]
-        actions = actions[self.config.stacking - 1:]
-
-        mean_loss = 0
-
-        for i in range(self.config.rollout_length):
-            frames = sequences[i]
-            action = actions[i]
-
-            values_pred = self.model(frames, action)[2]
-
-            loss = nn.MSELoss()(values_pred, values[i])
-
-            self.value_optimizer.zero_grad()
-            loss.backward()
-            clip_grad_norm_(self.model.value_estimator.parameters(), self.config.clip_grad_norm)
-            self.value_optimizer.step()
-
-            mean_loss += float(loss)
-
-        mean_loss = mean_loss / self.config.rollout_length
-
-        if self.config.use_wandb:
-            import wandb
-            wandb.log({'value_step': self.value_step, 'loss_value': mean_loss})
-            self.value_step += self.config.rollout_length
-
-        del sequences, initial_frames, initial_actions, actions, values
-
-        return mean_loss
