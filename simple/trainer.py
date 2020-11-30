@@ -6,7 +6,7 @@ from torch.cuda import empty_cache
 from torch.nn.utils import clip_grad_norm_
 from tqdm import trange
 
-from adafactor import Adafactor
+from simple.adafactor import Adafactor
 
 
 class Trainer:

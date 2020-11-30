@@ -3,8 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import truncnorm
 
-from utils import MeanAttention, ActionInjector, standardize_frame, get_timing_signal_nd, mix, Container, bit_to_int, \
-    one_hot_encode, sample_with_temperature, int_to_bit, ParameterSealer
+from atari_utils.utils import one_hot_encode
+from simple.utils import MeanAttention, ActionInjector, standardize_frame, get_timing_signal_nd, mix, Container, bit_to_int, \
+    sample_with_temperature, int_to_bit, ParameterSealer
 
 
 class RewardEstimator(nn.Module):

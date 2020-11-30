@@ -1,5 +1,4 @@
 import os
-import time
 import argparse
 from time import strftime
 from warnings import warn
@@ -8,18 +7,28 @@ import torch
 import numpy as np
 from tqdm import trange
 
-from ppo import PPO
-from subproc_vec_env import make_simulated_env
-from trainer import Trainer
-from atari_env import make_env, make_eval_env
-from next_frame_predictor import NextFramePredictor
+from atari_utils.envs import make_env
+from atari_utils.evaluation import evaluate
+from atari_utils.ppo_wrapper import PPO
+from atari_utils.utils import print_config
+from simple.subproc_vec_env import make_simulated_env
+from simple.trainer import Trainer
+from simple.next_frame_predictor import NextFramePredictor
 
 
 class SimPLe:
 
     def __init__(self, config):
         self.config = config
-        self.real_env = make_env(config, config.render_training)
+        self.real_env = make_env(
+            config.env_name,
+            config.device,
+            render=config.render_training,
+            frame_shape=config.frame_shape,
+            record=True,
+            rollout_length=50,
+            gamma=config.ppo_gamma
+        )
         self.model = NextFramePredictor(config, self.real_env.action_space.n).to(config.device)
         self.trainer = Trainer(self.model, config)
         self.simulated_env = make_simulated_env(config, self.model, self.real_env.action_space)
@@ -42,9 +51,7 @@ class SimPLe:
         self.real_env.envs[0].new_epoch()
         self.agent.set_env(self.real_env)
 
-        with trange(1, desc='Training agent in real env') as t:
-            for _ in t:
-                self.agent.learn(6400)
+        self.agent.learn(6400)
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo.pt'))
@@ -71,39 +78,24 @@ class SimPLe:
 
                     self.simulated_env.env_method('restart', initial_frames, initial_actions, indices=i)
 
-                losses = self.agent.learn(self.config.rollout_length * self.config.agents)
+                losses = self.agent.learn(self.config.rollout_length * self.config.agents, verbose=False)
                 t.set_postfix(losses)
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo.pt'))
 
     def evaluate_agent(self):
-        if self.config.agent_evaluation_epochs < 1:
-            return
-
-        env = make_eval_env(self.config, self.config.render_training)
-        self.agent.set_env(env)
-        cum_rewards = []
-        with trange(self.config.agent_evaluation_epochs, desc='Evaluating agent') as t:
-            for _ in t:
-                obs = env.reset()
-                self.agent.init_eval()
-                cum_reward = 0
-                for _ in range(10000):
-                    obs = obs.to(self.config.device)
-                    action = self.agent.predict(obs)[0]
-                    obs, reward, done, _ = env.step(action)
-                    if self.config.render_training:
-                        self.real_env.render()
-                    cum_reward += float(reward)
-                    if done[0]:
-                        break
-                cum_rewards.append(cum_reward)
-                t.set_postfix({'cum_reward': np.mean(cum_rewards)})
+        scores = evaluate(
+            self.agent,
+            self.config.env_name,
+            self.config.device,
+            render=self.config.render_training,
+            frame_shape=config.frame_shape
+        )
 
         if self.config.use_wandb:
             import wandb
-            wandb.log({'cum_reward': np.mean(cum_rewards)})
+            wandb.log({'cum_reward': np.mean(scores)})
 
     def load_models(self):
         self.model.load_state_dict(torch.load(os.path.join('models', 'model.pt')))
@@ -138,18 +130,13 @@ class SimPLe:
         self.simulated_env.close()
 
     def test(self):
-        env = make_eval_env(self.config, self.config.render_evaluation)
-        self.agent.set_env(env)
-        while True:
-            observation = env.reset()
-            self.agent.init_eval()
-            while True:
-                observation = observation.to(self.config.device)
-                action = self.agent.predict(observation)[0]
-                observation, _, done, _ = env.step(action)
-                time.sleep(1 / 60)
-                if done[0]:
-                    break
+        evaluate(
+            self.agent,
+            self.config.env_name,
+            self.config.device,
+            render=self.config.render_evaluation,
+            frame_shape=config.frame_shape
+        )
 
 
 if __name__ == '__main__':
@@ -191,14 +178,7 @@ if __name__ == '__main__':
     parser.add_argument('--value-model-batch-size', type=int, default=16)
     config = parser.parse_args()
 
-    args = vars(config)
-    max_len = 0
-    for arg in args:
-        max_len = max(max_len, len(arg))
-    for arg in args:
-        value = str(getattr(config, arg))
-        display = '{:<%i}: {}' % (max_len + 1)
-        print(display.format(arg, value))
+    print_config(config)
 
     if config.save_models and not os.path.isdir('models'):
         os.mkdir('models')

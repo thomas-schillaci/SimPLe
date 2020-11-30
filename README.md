@@ -8,7 +8,7 @@ Based on the paper [Model-Based Reinforcement Learning for Atari](https://arxiv.
 - [How to use](#how-to-use)
 - [Per-environment performance](#per-environment-performance)
 
-![World model predictions on freeway](src/res/freeway_wm.gif)
+![World model predictions on freeway](simple/res/freeway_wm.gif)
 
 *SimPLe predicting 46 frames in the future from 4 initial frames on Freeway.*
 
@@ -38,9 +38,9 @@ To use wandb, pass the flag `--use-wandb` when running the program. See [How to 
 
 CUDA is enabled by default, see the following section to disable it.
 
-To run the program, run the following command from the `src` directory:
+To run the program, run the following command from the folder containing the `simple` package:
 ```shell script
-python simple.py
+python -m simple
 ```
 
 ### Disable CUDA
@@ -62,7 +62,7 @@ The following boolean flags are set to `False` if not passed to the command line
 
 | Flag | Description |
 | ---- | ----------- |
-| --load-models | Loads models from `src/models/` and bypasses training |
+| --load-models | Loads models from `simple/models/` and bypasses training |
 | --render-evaluation | Renders the environments during evaluation |
 | --render-training | Renders the environments during training |
 | --save-models | Save the models after each epoch |
@@ -70,7 +70,7 @@ The following boolean flags are set to `False` if not passed to the command line
 
 For example, to run the program without CUDA and to render the environments during training, run:
 ```shell script
-python simple.py --device cpu --render-training
+python simple --device cpu --render-training
 ```
 
 ## Per-environment performance

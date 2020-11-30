@@ -9,9 +9,9 @@ from baselines.common.tile_images import tile_images
 from baselines.common.vec_env import VecEnvWrapper
 from cloudpickle import cloudpickle
 
-from atari_env import VecPytorchWrapper
-from simulated_env import _make_simulated_env
-from utils import one_hot_encode
+from atari_utils.envs import VecPytorchWrapper
+from atari_utils.utils import one_hot_encode
+from simple.simulated_env import _make_simulated_env
 
 import multiprocessing
 from collections import OrderedDict
@@ -450,5 +450,5 @@ class SubprocVecEnv(_SubprocVecEnv):
 def make_simulated_env(config, model, action_space):
     constructor = lambda i: (lambda: _make_simulated_env(config, action_space, i == 0))
     env = SubprocVecEnv([constructor(i) for i in range(config.agents)], model, action_space.n, config)
-    env = VecPytorchWrapper(env)
+    env = VecPytorchWrapper(env, config.device)
     return env

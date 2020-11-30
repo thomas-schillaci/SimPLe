@@ -1,6 +1,4 @@
 import torch
-import io
-import numpy as np
 from torch import nn as nn
 from torch.nn import functional as F
 
@@ -113,17 +111,6 @@ def sample_with_temperature(logits, temperature):
     choices = torch.multinomial(reshaped_logits, 1)
     choices = choices.view((logits.shape[:len(logits.shape) - 1]))
     return choices
-
-
-def one_hot_encode(action, n, dtype=torch.uint8):
-    if not isinstance(action, torch.Tensor):
-        action = torch.tensor(action)
-
-    res = action.long().view((-1, 1))
-    res = torch.zeros((len(res), n)).to(res.device).scatter(1, res, 1).type(dtype).to(res.device)
-    res = res.view((*action.shape, n))
-
-    return res
 
 
 def bit_to_int(x_bit, num_bits):
