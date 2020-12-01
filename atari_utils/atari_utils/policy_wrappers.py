@@ -40,6 +40,6 @@ class SampleWithTemperature(PolicyWrapper):
         self.temperature = temperature
 
     def act(self, obs):
-        value, real_action, action_log_prob = self.agent.act(obs)
+        value, real_action, action_log_prob = self.agent.act(obs, full_log_prob=True)
         action = sample_with_temperature(action_log_prob, self.temperature)
         return value, action, action_log_prob

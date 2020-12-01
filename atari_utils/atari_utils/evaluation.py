@@ -28,7 +28,7 @@ def evaluate(agent, env_name, device, agents=1, episodes=30, verbose=True, **kwa
 
         for i in range(agents):
             if 'r' in infos[i].keys() and not dones[i]:
-                assert done[i] == True
+                assert done[i]
                 dones[i] = True
                 scores.append(infos[i]['r'])
                 if verbose:

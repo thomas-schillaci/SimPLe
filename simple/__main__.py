@@ -9,8 +9,9 @@ from tqdm import trange
 
 from atari_utils.envs import make_env
 from atari_utils.evaluation import evaluate
+from atari_utils.policy_wrappers import SampleWithTemperature
 from atari_utils.ppo_wrapper import PPO
-from atari_utils.utils import print_config
+from atari_utils.utils import print_config, disable_baselines_logging
 from simple.subproc_vec_env import make_simulated_env
 from simple.trainer import Trainer
 from simple.next_frame_predictor import NextFramePredictor
@@ -51,7 +52,7 @@ class SimPLe:
         self.real_env.envs[0].new_epoch()
         self.agent.set_env(self.real_env)
 
-        self.agent.learn(6400)
+        self.agent.learn(6400, score_training=False)
 
         if self.config.save_models:
             self.agent.save(os.path.join('models', 'ppo.pt'))
@@ -78,7 +79,11 @@ class SimPLe:
 
                     self.simulated_env.env_method('restart', initial_frames, initial_actions, indices=i)
 
-                losses = self.agent.learn(self.config.rollout_length * self.config.agents, verbose=False)
+                losses = self.agent.learn(
+                    self.config.rollout_length * self.config.agents,
+                    verbose=False,
+                    score_training=False
+                )
                 t.set_postfix(losses)
 
         if self.config.save_models:
@@ -86,16 +91,17 @@ class SimPLe:
 
     def evaluate_agent(self):
         scores = evaluate(
-            self.agent,
+            SampleWithTemperature(self.agent),
             self.config.env_name,
             self.config.device,
             render=self.config.render_training,
-            frame_shape=config.frame_shape
+            frame_shape=config.frame_shape,
+            agents=self.config.agents
         )
 
         if self.config.use_wandb:
             import wandb
-            wandb.log({'cum_reward': np.mean(scores)})
+            wandb.log({'eval_score': np.mean(scores), 'eval_score_std': np.std(scores)})
 
     def load_models(self):
         self.model.load_state_dict(torch.load(os.path.join('models', 'model.pt')))
@@ -131,11 +137,12 @@ class SimPLe:
 
     def test(self):
         evaluate(
-            self.agent,
+            SampleWithTemperature(self.agent),
             self.config.env_name,
             self.config.device,
             render=self.config.render_evaluation,
-            frame_shape=config.frame_shape
+            frame_shape=config.frame_shape,
+            agents=self.config.agents
         )
 
 
@@ -166,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument('--ppo-lr', type=float, default=1e-4)
     parser.add_argument('--recurrent-state-size', type=int, default=64)
     parser.add_argument('--render-evaluation', default=False, action='store_true')
-    parser.add_argument('--render-training', default=False, action='store_true')
+    parser.add_argument('--render-training', default=False, action='store_true')  # FIXME doesn't work
     parser.add_argument('--residual-dropout', type=float, default=0.5)
     parser.add_argument('--reward-model-batch-size', type=int, default=16)
     parser.add_argument('--rollout-length', type=int, default=50)
@@ -179,6 +186,7 @@ if __name__ == '__main__':
     config = parser.parse_args()
 
     print_config(config)
+    disable_baselines_logging()
 
     if config.save_models and not os.path.isdir('models'):
         os.mkdir('models')

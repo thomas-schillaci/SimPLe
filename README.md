@@ -70,7 +70,7 @@ The following boolean flags are set to `False` if not passed to the command line
 
 For example, to run the program without CUDA and to render the environments during training, run:
 ```shell script
-python simple --device cpu --render-training
+python -m simple --device cpu --render-training
 ```
 
 ## Per-environment performance

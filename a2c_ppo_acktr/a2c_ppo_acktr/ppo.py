@@ -51,7 +51,6 @@ class PPO():
             for sample in data_generator:
                 obs_batch, actions_batch, value_preds_batch, return_batch, \
                 masks_batch, old_action_log_probs_batch, adv_targ = sample
-                old_action_log_probs_batch = old_action_log_probs_batch.gather(1, actions_batch)
 
                 obs_batch = self.augmentation(obs_batch)
 

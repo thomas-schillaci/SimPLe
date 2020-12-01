@@ -2,10 +2,10 @@ import cv2
 import gym
 import torch
 from baselines.common import atari_wrappers
-from baselines.common.vec_env import DummyVecEnv, ShmemVecEnv, VecEnvWrapper
+from baselines.common.vec_env import ShmemVecEnv, VecEnvWrapper
 import numpy as np
 
-from atari_utils.utils import one_hot_encode
+from atari_utils.utils import one_hot_encode, DummyVecEnv
 
 
 class WarpFrame(gym.ObservationWrapper):
@@ -35,12 +35,19 @@ class WarpFrame(gym.ObservationWrapper):
         obs = cv2.resize(
             obs,
             (self.width, self.height),
+            # (100, 100),
             interpolation=cv2.INTER_AREA if self.inter_area else cv2.INTER_NEAREST
         )
+
         obs = torch.tensor(obs, dtype=torch.uint8)
         if len(obs.shape) == 2:
             obs = obs.unsqueeze(-1)
         obs = obs.permute((2, 0, 1))
+
+        # crop_max = 100 - 84 + 1
+        # w = np.random.randint(0, crop_max)
+        # h = np.random.randint(0, crop_max)
+        # obs = obs[:, h:h + 84, w:w + 84]
 
         return obs
 
@@ -92,9 +99,6 @@ class VecPytorchWrapper(VecEnvWrapper):
         self.stacked_obs.zero_()
         self.stacked_obs[:, -self.shape_dim0:] = obs
         return self.stacked_obs
-
-    def close(self):
-        self.venv.close()
 
 
 class ClipRewardEnv(gym.RewardWrapper):
@@ -275,8 +279,9 @@ def _make_env(
 
 def make_envs(env_name, num, device, **kwargs):
     env_fns = [lambda: _make_env(env_name, **kwargs)]
-    kwargs['render'] = False
-    env_fns += [lambda: _make_env(env_name, **kwargs)] * (num - 1)
+    kwargs_no_render = kwargs.copy()
+    kwargs_no_render['render'] = False
+    env_fns += [lambda: _make_env(env_name, **kwargs_no_render)] * (num - 1)
     if num == 1:
         env = DummyVecEnv(env_fns)
     else:

@@ -26,12 +26,12 @@ class Policy(nn.Module):
         if action_space.__class__.__name__ == "Discrete":
             num_outputs = action_space.n
             self.dist = Categorical(self.base.output_size, num_outputs)
-        elif action_space.__class__.__name__ == "Box":
-            num_outputs = action_space.shape[0]
-            self.dist = DiagGaussian(self.base.output_size, num_outputs)
-        elif action_space.__class__.__name__ == "MultiBinary":
-            num_outputs = action_space.shape[0]
-            self.dist = Bernoulli(self.base.output_size, num_outputs)
+        # elif action_space.__class__.__name__ == "Box":
+        #     num_outputs = action_space.shape[0]
+        #     self.dist = DiagGaussian(self.base.output_size, num_outputs)
+        # elif action_space.__class__.__name__ == "MultiBinary":
+        #     num_outputs = action_space.shape[0]
+        #     self.dist = Bernoulli(self.base.output_size, num_outputs)
         else:
             raise NotImplementedError
 
@@ -47,18 +47,20 @@ class Policy(nn.Module):
     def forward(self, inputs):
         raise NotImplementedError
 
-    def act(self, inputs, deterministic=False):
+    def act(self, inputs, deterministic=False, full_log_prob=False):
         value, actor_features = self.base(inputs)
         logits = self.dist(actor_features)
-        dist = FixedCategorical(logits=logits)  # FIXME more dists
+        dist = FixedCategorical(logits=logits)
 
         if deterministic:
             action = dist.mode()
         else:
             action = dist.sample()
 
-        # action_log_probs = dist.log_probs(action)
-        action_log_probs = torch.log_softmax(logits, dim=-1)
+        if full_log_prob:
+            action_log_probs = torch.log_softmax(logits, dim=-1)
+        else:
+            action_log_probs = dist.log_probs(action)
 
         dist_entropy = dist.entropy().mean()
 
@@ -67,12 +69,16 @@ class Policy(nn.Module):
     def get_value(self, inputs):
         return self.base(inputs)[0]
 
-    def evaluate_actions(self, inputs, action):
+    def evaluate_actions(self, inputs, action, full_log_prob=False):
         value, actor_features = self.base(inputs)
         logits = self.dist(actor_features)
-        dist = FixedCategorical(logits=logits)  # FIXME more dists
+        dist = FixedCategorical(logits=logits)
 
-        action_log_probs = dist.log_probs(action)
+        if full_log_prob:
+            action_log_probs = torch.log_softmax(logits, dim=-1)
+        else:
+            action_log_probs = dist.log_probs(action)
+
         dist_entropy = dist.entropy().mean()
 
         return value, action_log_probs, dist_entropy

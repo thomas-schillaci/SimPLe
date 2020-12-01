@@ -65,7 +65,8 @@ class PPO:
             eval_episodes=30,
             eval_agents=None,
             evaluations=10,
-            graph=False
+            graph=False,
+            score_training=True
     ):
         if eval_agents is None:
             eval_agents = self.env.num_envs
@@ -134,7 +135,7 @@ class PPO:
                 'ppo_value_loss': float(value_loss),
                 'ppo_action_loss': float(action_loss)
             }
-            if score_queue:
+            if score_queue and score_training:
                 metrics.update({'mean_score': moving_average_score[-1]})
             if eval_mean_scores:
                 metrics.update({'mean_eval_score': eval_mean_scores[-1]})
@@ -182,6 +183,5 @@ class PPO:
     def load(self, path):
         self.actor_critic = torch.load(path)
 
-    def act(self, obs):
-        value, action, action_log_prob = self.actor_critic.act(obs, deterministic=True)
-        return value, action, action_log_prob
+    def act(self, obs, full_log_prob=False):
+        return self.actor_critic.act(obs, deterministic=True, full_log_prob=full_log_prob)

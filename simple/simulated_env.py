@@ -21,7 +21,7 @@ class SimulatedEnv(Env):
     def step(self, args):
         state, reward, done = args
 
-        state = state.cpu().detach()
+        # state = state.cpu().detach()
         self.last_state = state
 
         if self.main and self.config.render_training:
