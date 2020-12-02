@@ -8,7 +8,8 @@ from tqdm import trange
 from a2c_ppo_acktr import ppo
 from a2c_ppo_acktr.policy import Policy
 from a2c_ppo_acktr.rollout_storage import RolloutStorage
-from a2c_ppo_acktr.utils import update_linear_schedule, Augmentation
+from a2c_ppo_acktr.utils import update_linear_schedule
+from a2c_ppo_acktr.augmentation import Augmentation
 from atari_utils.evaluation import evaluate
 from atari_utils.policy_wrappers import PolicyWrapper
 
@@ -111,6 +112,8 @@ class PPO:
                 # If done then clean the history of observations.
                 masks = (~torch.tensor(done)).float().unsqueeze(1)
                 rollouts.insert(obs, action, action_log_prob, value, reward, masks)
+
+            # self.env.reset_params()  # FIXME
 
             with torch.no_grad():
                 next_value = self.actor_critic.get_value(rollouts.obs[-1]).detach()

@@ -117,7 +117,6 @@ def print_config(config):
 def disable_baselines_logging():
     logger.configure(format_strs='')
 
-
 def one_hot_encode(action, n, dtype=torch.uint8):
     if not isinstance(action, torch.Tensor):
         action = torch.tensor(action)

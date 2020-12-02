@@ -35,7 +35,6 @@ class WarpFrame(gym.ObservationWrapper):
         obs = cv2.resize(
             obs,
             (self.width, self.height),
-            # (100, 100),
             interpolation=cv2.INTER_AREA if self.inter_area else cv2.INTER_NEAREST
         )
 
@@ -43,11 +42,6 @@ class WarpFrame(gym.ObservationWrapper):
         if len(obs.shape) == 2:
             obs = obs.unsqueeze(-1)
         obs = obs.permute((2, 0, 1))
-
-        # crop_max = 100 - 84 + 1
-        # w = np.random.randint(0, crop_max)
-        # h = np.random.randint(0, crop_max)
-        # obs = obs[:, h:h + 84, w:w + 84]
 
         return obs
 
@@ -252,6 +246,50 @@ class RecorderEnv(gym.Wrapper):
         return obs
 
 
+class CropVecEnv(VecEnvWrapper):
+
+    def __init__(self, env, agents):
+        self.agents = agents
+        self.w1 = None
+        self.h1 = None
+        self.reset_params()
+
+        shape = list(env.observation_space.low.shape)
+        shape[-1] = 84
+        shape[-2] = 84
+
+        low = np.zeros(shape)
+        high = np.full(shape, 255)
+
+        observation_space = gym.spaces.Box(low=low, high=high, dtype=env.observation_space.dtype)
+        super().__init__(env, observation_space, env.action_space)
+
+    def crop(self, obs):
+        assert len(obs.shape) == 4
+        assert obs.shape[-1] == 100
+
+        res = torch.empty((len(obs),) + self.observation_space.shape).to(obs.device)
+
+        for i in range(len(obs)):
+            res[i] = obs[i, :, self.h1[i]:self.h1[i] + 84, self.w1[i]:self.w1[i] + 84]
+
+        return res
+
+    def reset_params(self):
+        self.w1 = torch.randint(high=17, size=(self.agents,))
+        self.h1 = torch.randint(high=17, size=(self.agents,))
+
+    def step_wait(self):
+        obs, rews, news, infos = self.venv.step_wait()
+        obs = self.crop(obs)
+        return obs, rews, news, infos
+
+    def reset(self):
+        obs = self.venv.reset()
+        obs = self.crop(obs)
+        return obs
+
+
 def _make_env(
         env_name,
         render=False,
@@ -277,7 +315,9 @@ def _make_env(
     return env
 
 
-def make_envs(env_name, num, device, **kwargs):
+def make_envs(env_name, num, device, crop=False, **kwargs):
+    if crop:  # FIXME
+        kwargs['frame_shape'] = (kwargs['frame_shape'][0], 100, 100)
     env_fns = [lambda: _make_env(env_name, **kwargs)]
     kwargs_no_render = kwargs.copy()
     kwargs_no_render['render'] = False
@@ -287,6 +327,8 @@ def make_envs(env_name, num, device, **kwargs):
     else:
         env = ShmemVecEnv(env_fns)
     env = VecPytorchWrapper(env, device)
+    if crop:
+        env = CropVecEnv(env, num)
     return env
 
 

@@ -1,9 +1,8 @@
-import kornia
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from a2c_ppo_acktr.utils import Intensity, Augmentation
+from a2c_ppo_acktr.augmentation import Augmentation
 
 
 class PPO():
