@@ -117,6 +117,7 @@ def print_config(config):
 def disable_baselines_logging():
     logger.configure(format_strs='')
 
+
 def one_hot_encode(action, n, dtype=torch.uint8):
     if not isinstance(action, torch.Tensor):
         action = torch.tensor(action)
@@ -126,9 +127,3 @@ def one_hot_encode(action, n, dtype=torch.uint8):
     res = res.view((*action.shape, n))
 
     return res
-
-
-# See https://github.com/pytorch/pytorch/issues/973#issuecomment-346405667
-def fix_ulimit():
-    rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))

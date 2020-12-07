@@ -45,8 +45,10 @@ class RolloutStorage(object):
 
         self.step = (self.step + 1) % self.num_steps
 
-    def after_update(self):
-        self.obs[0].copy_(self.obs[-1])
+    def after_update(self, obs=None):
+        if obs is None:
+            obs = self.obs[-1]
+        self.obs[0].copy_(obs)
         self.masks[0].copy_(self.masks[-1])
 
     def compute_returns(self, next_value, use_gae, gamma, gae_lambda):

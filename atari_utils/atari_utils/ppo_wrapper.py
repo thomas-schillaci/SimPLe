@@ -30,7 +30,8 @@ class PPO:
                  eps=1e-5,
                  max_grad_norm=0.5,
                  ppo_epoch=4,
-                 use_wandb=False
+                 use_wandb=False,
+                 crop = False  # FIXME
                  ):
 
         self.env = env
@@ -40,6 +41,7 @@ class PPO:
         self.num_steps = num_steps
         self.num_processes = self.env.num_envs
         self.use_wandb = use_wandb
+        self.crop=crop
 
         self.actor_critic = Policy(self.env.observation_space.shape, self.env.action_space)
         self.actor_critic.to(self.device)
@@ -113,14 +115,15 @@ class PPO:
                 masks = (~torch.tensor(done)).float().unsqueeze(1)
                 rollouts.insert(obs, action, action_log_prob, value, reward, masks)
 
-            # self.env.reset_params()  # FIXME
-
             with torch.no_grad():
                 next_value = self.actor_critic.get_value(rollouts.obs[-1]).detach()
 
             rollouts.compute_returns(next_value, True, self.gamma, 0.95)
             value_loss, action_loss, dist_entropy = self.agent.update(rollouts)
-            rollouts.after_update()
+
+            if self.crop:
+                self.env.reset_params()
+                rollouts.after_update(self.env.get_last_real_obs_cropped())
 
             if (j % ceil(num_updates / evaluations) == 0 or j == num_updates - 1) and eval_env_name is not None:
                 scores = evaluate(
@@ -129,7 +132,8 @@ class PPO:
                     self.device,
                     agents=eval_agents,
                     episodes=eval_episodes,
-                    verbose=False
+                    verbose=False,
+                    crop=self.crop
                 )
                 eval_mean_scores.append(np.mean(scores))
                 eval_mean_scores_std.append(np.std(scores))

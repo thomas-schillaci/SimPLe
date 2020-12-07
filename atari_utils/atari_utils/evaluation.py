@@ -5,7 +5,7 @@ from tqdm import trange
 from atari_utils.envs import make_envs
 
 
-def evaluate(agent, env_name, device, agents=1, episodes=30, verbose=True, **kwargs):
+def evaluate(agent, env_name, device, agents=1, episodes=30, verbose=True, crop=False, **kwargs):
     scores = []
     if verbose:
         t = trange(episodes, desc='Evaluating agent')
@@ -17,7 +17,9 @@ def evaluate(agent, env_name, device, agents=1, episodes=30, verbose=True, **kwa
         if dones.all():
             if env is not None:
                 env.close()
-            env = make_envs(env_name, agents, device, **kwargs)
+            env = make_envs(env_name, agents, device, crop=crop, **kwargs)
+            if crop:
+                env.reset_params(random=False)
             dones = np.array([False] * agents)
             obs = env.reset()
 

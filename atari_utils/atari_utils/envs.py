@@ -253,6 +253,7 @@ class CropVecEnv(VecEnvWrapper):
         self.w1 = None
         self.h1 = None
         self.reset_params()
+        self.last_real_obs = None
 
         shape = list(env.observation_space.low.shape)
         shape[-1] = 84
@@ -275,12 +276,17 @@ class CropVecEnv(VecEnvWrapper):
 
         return res
 
-    def reset_params(self):
-        self.w1 = torch.randint(high=17, size=(self.agents,))
-        self.h1 = torch.randint(high=17, size=(self.agents,))
+    def reset_params(self, random=True):
+        if random:
+            self.w1 = torch.randint(high=17, size=(self.agents,))
+            self.h1 = torch.randint(high=17, size=(self.agents,))
+        else:
+            self.w1 = torch.full((self.agents,), 8)
+            self.h1 = torch.full((self.agents,), 8)
 
     def step_wait(self):
         obs, rews, news, infos = self.venv.step_wait()
+        self.last_real_obs = obs
         obs = self.crop(obs)
         return obs, rews, news, infos
 
@@ -288,6 +294,12 @@ class CropVecEnv(VecEnvWrapper):
         obs = self.venv.reset()
         obs = self.crop(obs)
         return obs
+
+    def get_last_real_obs(self):
+        return self.last_real_obs
+
+    def get_last_real_obs_cropped(self):
+        return self.crop(self.last_real_obs)
 
 
 def _make_env(
@@ -317,7 +329,7 @@ def _make_env(
 
 def make_envs(env_name, num, device, crop=False, **kwargs):
     if crop:  # FIXME
-        kwargs['frame_shape'] = (kwargs['frame_shape'][0], 100, 100)
+        kwargs['frame_shape'] = (1, 100, 100)
     env_fns = [lambda: _make_env(env_name, **kwargs)]
     kwargs_no_render = kwargs.copy()
     kwargs_no_render['render'] = False

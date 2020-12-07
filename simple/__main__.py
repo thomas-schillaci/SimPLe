@@ -173,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument('--ppo-lr', type=float, default=1e-4)
     parser.add_argument('--recurrent-state-size', type=int, default=64)
     parser.add_argument('--render-evaluation', default=False, action='store_true')
-    parser.add_argument('--render-training', default=False, action='store_true')  # FIXME doesn't work
+    parser.add_argument('--render-training', default=False, action='store_true')
     parser.add_argument('--residual-dropout', type=float, default=0.5)
     parser.add_argument('--reward-model-batch-size', type=int, default=16)
     parser.add_argument('--rollout-length', type=int, default=50)
@@ -187,7 +187,7 @@ if __name__ == '__main__':
 
     print_config(config)
     disable_baselines_logging()
-    fix_ulimit()
+    torch.multiprocessing.set_sharing_strategy('file_system')
 
     if config.save_models and not os.path.isdir('models'):
         os.mkdir('models')
