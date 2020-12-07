@@ -123,7 +123,7 @@ class SimPLe:
                  'If this happens continuously, consider improving the agent, reducing the rollout length,'
                  'or changing the environment.')
             return self.train()
-        self.evaluate_agent()
+        # self.evaluate_agent()
 
         for epoch in trange(15, desc='Epoch'):
             self.trainer.train(epoch, self.real_env.envs[0])

@@ -27,7 +27,7 @@ class Trainer:
 
     def train(self, epoch, real_env):
         self.train_world_model(epoch, real_env.sample_buffer)
-        self.train_reward_model(epoch, real_env)
+        self.train_reward_model(real_env.buffer, real_env.action_space.n)
 
     def train_world_model(self, epoch, sample_buffer):
         self.model.train()
@@ -181,118 +181,90 @@ class Trainer:
 
         return losses
 
-    def train_reward_model(self, epoch, real_env):
+    def train_reward_model(self, buffer, n_action):
         self.model.eval()
         self.model.reward_estimator.train()
 
-        steps = 150
-        steps *= self.config.reward_model_batch_size
+        steps = 300
+        generator = self.reward_model_generator(buffer, steps, n_action)
 
-        epochs = 2
+        t = trange(0, steps, desc='Training reward model')
+        for frames, actions, rewards in generator:
+            assert frames.dtype == torch.uint8
+            assert actions.dtype == torch.uint8
+            assert rewards.dtype == torch.uint8
+            frames = frames.float() / 255
+            actions = actions.float()
+            rewards = rewards.long()
 
-        if epoch == 0:
-            epochs *= 3
-
-        with trange(0, epochs * steps, steps, desc='Training reward model', unit_scale=steps) as t:
-            for _ in t:
-                reward_counts = [0] * 3
-                for _, _, rewards, _, _ in real_env.buffer:
-                    for reward in rewards:
-                        reward_counts[int(reward)] += 1
-
-                frames = torch.empty((self.config.stacking, 0, *self.config.frame_shape), dtype=torch.uint8)
-                actions = torch.empty((self.config.stacking, 0, real_env.action_space.n), dtype=torch.uint8)
-                rewards = torch.empty((0,), dtype=torch.uint8)
-
-                non_zeros = 3
-                for reward_count in reward_counts:
-                    if reward_count == 0:
-                        non_zeros -= 1
-
-                for i, reward_count in enumerate(reward_counts):
-                    if reward_count == 0:
-                        continue
-
-                    if reward_count < max(reward_counts) and reward_count < steps / non_zeros:
-                        multiplier = int(steps / non_zeros / reward_count)
-                        for sequence, b_actions, b_rewards, _, _ in real_env.buffer:
-                            additional_samples = 0
-                            for j, reward in enumerate(b_rewards):
-                                if int(reward) == i or additional_samples > 0:
-                                    if int(reward) == i:
-                                        additional_samples = 2
-                                    else:
-                                        additional_samples -= 1
-                                    frames = torch.cat(
-                                        [frames] + [sequence[j:j + self.config.stacking].unsqueeze(1)] * multiplier,
-                                        dim=1
-                                    )
-                                    actions = torch.cat(
-                                        [actions] + [b_actions[j:j + self.config.stacking].unsqueeze(1)] * multiplier,
-                                        dim=1
-                                    )
-                                    rewards = torch.cat([rewards] + [reward.unsqueeze(0)] * multiplier)
-                    else:
-                        count = 0
-                        while count < steps / non_zeros:
-                            sequence, b_actions, b_rewards, _, _ = real_env.sample_buffer()
-                            j = int(torch.randint(high=len(b_rewards), size=(1,)))
-                            reward = b_rewards[j]
-                            if int(reward) == i:
-                                frames = torch.cat(
-                                    (frames, sequence[j:j + self.config.stacking].unsqueeze(1)),
-                                    dim=1
-                                )
-                                actions = torch.cat(
-                                    (actions, b_actions[j:j + self.config.stacking].unsqueeze(1)),
-                                    dim=1
-                                )
-                                rewards = torch.cat((rewards, reward.unsqueeze(0)))
-                                count += 1
-
-                permutation = torch.randperm(len(rewards))
-                frames = frames[:, permutation]
-                actions = actions[:, permutation]
-                rewards = rewards[permutation]
-
-                loss = self.train_reward_model_impl(frames, actions, rewards)
-                loss = format(loss, '.4e')
-                t.set_postfix({'loss_reward': loss})
-
-        empty_cache()
-        if self.config.save_models:
-            torch.save(self.model.reward_estimator.state_dict(), os.path.join('models', 'reward_model.pt'))
-
-    def train_reward_model_impl(self, frames, actions, rewards):
-        assert frames.dtype == torch.uint8
-        assert actions.dtype == torch.uint8
-        assert rewards.dtype == torch.uint8
-        frames = frames.float() / 255
-        actions = actions.float()
-        rewards = rewards.long()
-
-        batch_size = self.config.reward_model_batch_size
-        loss = None
-        for i in range(len(rewards) // batch_size):
-            frame = frames[:, i * batch_size:(i + 1) * batch_size].to(self.config.device)
-            action = actions[:, i * batch_size:(i + 1) * batch_size].to(self.config.device)
-            reward = rewards[i * batch_size:(i + 1) * batch_size].to(self.config.device)
+            frame = frames.to(self.config.device)
+            action = actions.to(self.config.device)
+            reward = rewards.to(self.config.device)
 
             self.model.warmup(frame[:self.config.stacking], action[:self.config.stacking - 1])
 
             reward_pred = self.model(frame[-1], action[-1])[1]
             loss = nn.CrossEntropyLoss()(reward_pred, reward)
 
+            if float(torch.rand((1,))) < 0.01:
+                import matplotlib.pyplot as plot
+                for j in range(4):
+                    plot.subplot(1, 4, j + 1)
+                    plot.imshow(frame[j, 0, 0].cpu().detach().numpy(), cmap='gray')
+                plot.suptitle(f'{int(reward[0])} {reward_pred[0].cpu().detach().numpy()} {float(loss)}')
+                plot.show()
+
             self.reward_optimizer.zero_grad()
             loss.backward()
             clip_grad_norm_(self.model.reward_estimator.parameters(), self.config.clip_grad_norm)
             self.reward_optimizer.step()
+
+            loss = format(loss, '.4e')
+            t.set_postfix({'loss_reward': loss})
+            t.update()
 
             if self.config.use_wandb:
                 import wandb
                 wandb.log({'loss_reward': float(loss), 'reward_step': self.reward_step})
                 self.reward_step += 1
 
-        del frames, actions, rewards
+            del frames, actions, rewards
 
-        return float(loss)
+        empty_cache()
+        if self.config.save_models:
+            torch.save(self.model.reward_estimator.state_dict(), os.path.join('models', 'reward_model.pt'))
+
+    def reward_model_generator(self, buffer, steps, n_action):
+        unpacked_rewards = torch.empty((len(buffer), self.config.rollout_length), dtype=torch.long)
+        for i, (_, _, rewards, _, _) in enumerate(buffer):
+            unpacked_rewards[i] = rewards
+
+        reward_count = torch.tensor([(unpacked_rewards == i).sum() for i in range(3)])
+        weights = 1 - reward_count / reward_count.sum()
+        indices_weights = torch.zeros_like(unpacked_rewards, dtype=torch.float)
+        for i in range(3):
+            indices_weights[unpacked_rewards == i] = weights[i]
+        indices = torch.multinomial(indices_weights.view((-1)), steps * self.config.batch_size, replacement=True)
+
+        def get_far():
+            return \
+                torch.empty(
+                    (self.config.stacking, self.config.batch_size, *self.config.frame_shape),
+                    dtype=torch.uint8
+                ), \
+                torch.empty((self.config.stacking, self.config.batch_size, n_action), dtype=torch.uint8), \
+                torch.empty((self.config.batch_size,), dtype=torch.uint8)
+
+        frames, actions, rewards = get_far()
+        for i, index in enumerate(indices):
+            x = index // self.config.rollout_length
+            y = index % self.config.rollout_length
+
+            sequences, b_actions, b_rewards, _, _ = buffer[x]
+            frames[:, i % self.config.batch_size] = sequences[y:y + self.config.stacking]
+            actions[:, i % self.config.batch_size] = b_actions[y:y + self.config.stacking]
+            rewards[i % self.config.batch_size] = b_rewards[y]
+
+            if (i + 1) % self.config.batch_size == 0:
+                yield frames, actions, rewards
+                frames, actions, rewards = get_far()
