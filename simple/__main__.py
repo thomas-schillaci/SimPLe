@@ -11,7 +11,7 @@ from atari_utils.envs import make_env
 from atari_utils.evaluation import evaluate
 from atari_utils.policy_wrappers import SampleWithTemperature
 from atari_utils.ppo_wrapper import PPO
-from atari_utils.utils import print_config, disable_baselines_logging, fix_ulimit
+from atari_utils.utils import print_config, disable_baselines_logging
 from simple.subproc_vec_env import make_simulated_env
 from simple.trainer import Trainer
 from simple.next_frame_predictor import NextFramePredictor
