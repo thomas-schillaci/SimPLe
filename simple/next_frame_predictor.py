@@ -4,8 +4,8 @@ import torch.nn.functional as F
 from scipy.stats import truncnorm
 
 from atari_utils.utils import one_hot_encode
-from simple.utils import MeanAttention, ActionInjector, standardize_frame, get_timing_signal_nd, mix, Container, bit_to_int, \
-    sample_with_temperature, int_to_bit, ParameterSealer
+from simple.utils import MeanAttention, ActionInjector, standardize_frame, get_timing_signal_nd, mix, Container, \
+    bit_to_int, sample_with_temperature, int_to_bit, ParameterSealer
 
 
 class RewardEstimator(nn.Module):
@@ -121,12 +121,12 @@ class BitsPredictor(nn.Module):
         return 2 * outputs - 1, 0.0
 
 
-class StochasticModel(Container):
+class StochasticModel(nn.Module):
 
     def __init__(self, config, layer_shape, n_action):
         super().__init__()
         self.config = config
-        channels = 2 * self.config.frame_shape[0]
+        channels = self.config.frame_shape[0] * (self.config.stacking + 1)
         filters = [128, 512]
         self.lstm_loss = None
         self.get_lstm_loss()
@@ -140,16 +140,12 @@ class StochasticModel(Container):
 
         self.action_injector = ActionInjector(n_action, self.config.hidden_size)
         self.mean_attentions = nn.ModuleList([MeanAttention(n_filter, 2 * channels) for n_filter in filters])
-        bits_predictor = BitsPredictor(
+        self.bits_predictor = BitsPredictor(
             config,
             layer_shape[0] * layer_shape[1] * layer_shape[2],
             self.config.latent_state_size,
             self.config.bottleneck_bits
         )
-        if self.config.decouple_optimizers:
-            self.bits_predictor = ParameterSealer(bits_predictor)
-        else:
-            self.bits_predictor = bits_predictor
 
     def add_bits(self, layer, bits):
         z_mul = self.dense2(bits)
@@ -216,20 +212,17 @@ class NextFramePredictor(Container):
 
         # Internal states
 
+        channels = self.config.frame_shape[0] * self.config.stacking
+        if self.config.stack_internal_states:
+            channels += self.config.recurrent_state_size
+
         self.internal_states = None
-        self.gate = nn.Conv2d(
-            self.config.frame_shape[0] + self.config.recurrent_state_size,
-            2 * self.config.recurrent_state_size,
-            3,
-            padding=1
-        )
+        self.last_x_start = None
+        if self.config.stack_internal_states:
+            self.gate = nn.Conv2d(channels, 2 * self.config.recurrent_state_size, 3, padding=1)
 
         # Model
-        self.input_embedding = nn.Conv2d(
-            self.config.frame_shape[0] + self.config.recurrent_state_size,
-            self.config.hidden_size,
-            1
-        )
+        self.input_embedding = nn.Conv2d(channels, self.config.hidden_size, 1)
 
         self.downscale_layers = []
         shape = list(self.config.frame_shape)
@@ -275,56 +268,39 @@ class NextFramePredictor(Container):
 
         # Sub-models
         self.middle_network = MiddleNetwork(self.config, middle_shape[0])
-        reward_estimator = RewardEstimator(self.config, middle_shape[0] + filters)
-        value_estimator = ValueEstimator(middle_shape[0] * middle_shape[1] * middle_shape[2])
+        self.reward_estimator = ParameterSealer(RewardEstimator(self.config, middle_shape[0] + filters))
+        self.value_estimator = ValueEstimator(middle_shape[0] * middle_shape[1] * middle_shape[2])
         self.stochastic_model = StochasticModel(self.config, middle_shape, n_action)
-
-        if self.config.decouple_optimizers:
-            self.reward_estimator = ParameterSealer(reward_estimator)
-            self.value_estimator = ParameterSealer(value_estimator)
-        else:
-            self.reward_estimator = reward_estimator
-            self.value_estimator = value_estimator
 
     def init_internal_states(self, batch_size):
         self.internal_states = torch.zeros(
             (batch_size, self.config.recurrent_state_size, *self.config.frame_shape[1:])
         ).to(self.config.device)
+        self.last_x_start = None
 
-    def update_internal_states_early(self, frames):
-        internal_state = self.internal_states.detach()
-        state_activation = torch.cat((internal_state, frames), dim=1)
+    def get_internal_states(self):
+        internal_states = self.internal_states
+        if self.last_x_start is None:
+            return internal_states
+        state_activation = torch.cat((internal_states, self.last_x_start), dim=1)
         state_gate_candidate = self.gate(state_activation)
         state_gate, state_candidate = torch.split(state_gate_candidate, self.config.recurrent_state_size, dim=1)
         state_gate = torch.sigmoid(state_gate)
         state_candidate = torch.tanh(state_candidate)
-        internal_state = internal_state * state_gate
-        internal_state = internal_state + state_candidate * (1 - state_gate)
-        self.internal_states = internal_state
+        internal_states = internal_states * state_gate
+        internal_states = internal_states + state_candidate * (1 - state_gate)
+        self.internal_states = internal_states.detach()
+        return internal_states
 
-    def warmup(self, frames, actions):
-        assert len(frames) == self.config.stacking
-        assert len(actions) == self.config.stacking - 1
-
-        batch_size = frames.shape[1]
-        self.init_internal_states(batch_size)
-
-        loss = torch.zeros((1,)).to(frames.device)
-
-        for i in range(self.config.stacking - 1):
-            frame = frames[i]
-            action = actions[i]
-            frame_pred = self(frame, action)[0]
-            target = (frames[i + 1].detach() * 255).long()
-            loss = loss + nn.CrossEntropyLoss()(frame_pred, target)
-
-        return loss
-
-    def forward(self, x, action, target=None, epsilon=0.0):
+    def forward(self, x, action, target=None, epsilon=0):
         x_start = torch.stack([standardize_frame(frame) for frame in x])
 
-        x = torch.cat((x_start, self.internal_states), dim=1)
-        self.update_internal_states_early(x_start)
+        if self.config.stack_internal_states:
+            internal_states = self.get_internal_states()
+            x = torch.cat((x_start, internal_states), dim=1)
+            self.last_x_start = x_start
+        else:
+            x = x_start
 
         x = self.input_embedding(x)
         x = x + get_timing_signal_nd(x.shape).to(self.config.device)

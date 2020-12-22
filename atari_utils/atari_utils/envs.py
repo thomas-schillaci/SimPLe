@@ -1,9 +1,14 @@
 import cv2
+# See https://stackoverflow.com/questions/54013846/pytorch-dataloader-stucked-if-using-opencv-resize-method
+# See https://github.com/pytorch/pytorch/issues/1355
+cv2.setNumThreads(0)
 import gym
 import torch
 from baselines.common import atari_wrappers
+from baselines.common.atari_wrappers import NoopResetEnv
 from baselines.common.vec_env import ShmemVecEnv, VecEnvWrapper
 import numpy as np
+from gym.wrappers import TimeLimit
 
 from atari_utils.utils import one_hot_encode, DummyVecEnv
 
@@ -141,7 +146,6 @@ class RecorderEnv(gym.Wrapper):
         self.current_rewards = []
 
         self.initial_frames = None
-        self.initial_actions = None
 
     def sample_buffer(self, batch_size=-1):
         if not self.buffer:
@@ -162,11 +166,11 @@ class RecorderEnv(gym.Wrapper):
                 rewards.append(reward)
                 targets.append(target)
                 values.append(value)
-            sequences = torch.stack(sequences, dim=1)
-            actions = torch.stack(actions, dim=1)
-            rewards = torch.stack(rewards, dim=1)
-            targets = torch.stack(targets, dim=1)
-            values = torch.stack(values, dim=1)
+            sequences = torch.stack(sequences)
+            actions = torch.stack(actions)
+            rewards = torch.stack(rewards)
+            targets = torch.stack(targets)
+            values = torch.stack(values)
             return sequences, actions, rewards, targets, values
 
         index = int(torch.randint(len(self.buffer), size=(1,)))
@@ -178,10 +182,10 @@ class RecorderEnv(gym.Wrapper):
 
     def new_epoch(self):
         self.initial_frames = None
-        self.initial_actions = None
 
     def get_first_small_rollout(self):
-        return self.initial_frames, self.initial_actions
+        assert len(self.initial_frames) == self.frame_stacking
+        return self.initial_frames
 
     def reset_sartv(self):
         self.sequence = torch.empty((0, *self.frame_shape), dtype=torch.uint8)
@@ -193,19 +197,18 @@ class RecorderEnv(gym.Wrapper):
     def add_interaction(self, last_obs, action, obs, reward):
         last_state = last_obs.clone().detach().byte()
         self.sequence = torch.cat((self.sequence, last_state.unsqueeze(0)))
-        action = one_hot_encode(action, self.action_space.n)
-        self.actions = torch.cat((self.actions, action))
 
         n = len(self.sequence)
 
         if n == self.frame_stacking and self.initial_frames is None:
             self.initial_frames = self.sequence
-            self.initial_actions = self.actions
 
         if n >= self.frame_stacking:
-            self.current_rewards.append(reward)
+            action = one_hot_encode(action, self.action_space.n)
+            self.actions = torch.cat((self.actions, action))
 
-            reward += 1  # Convert to {0; 1; 2}
+            self.current_rewards.append(reward)
+            reward = reward + 1  # Convert to {0; 1; 2}
             reward = torch.tensor(reward, dtype=torch.uint8)
             self.rewards = torch.cat((self.rewards, reward.unsqueeze(0)))
 
@@ -231,7 +234,9 @@ class RecorderEnv(gym.Wrapper):
                     break
                 self.buffer[i][-1] = torch.empty((self.rollout_length,), dtype=torch.float32)
                 for j in range(self.rollout_length - 1, -1, -1):
-                    value = self.current_rewards.pop() + self.gamma * value
+                    r = self.current_rewards.pop()
+                    assert int(r) == -1 or int(r) == 0 or int(r) == 1
+                    value = r + self.gamma * value
                     self.buffer[i][-1][j] = value
 
             assert not self.current_rewards
@@ -246,60 +251,28 @@ class RecorderEnv(gym.Wrapper):
         return obs
 
 
-class CropVecEnv(VecEnvWrapper):
+class SkipEnv(gym.Wrapper):
+    def __init__(self, env, skip=4):
+        """Return only every `skip`-th frame"""
+        gym.Wrapper.__init__(self, env)
+        self._skip = skip
 
-    def __init__(self, env, agents):
-        self.agents = agents
-        self.w1 = None
-        self.h1 = None
-        self.reset_params()
-        self.last_real_obs = None
+    def step(self, action):
+        """Repeat action, sum reward, and max over last observations."""
+        obs = None
+        total_reward = 0.0
+        done = None
+        info = None
+        for i in range(self._skip):
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
 
-        shape = list(env.observation_space.low.shape)
-        shape[-1] = 84
-        shape[-2] = 84
+        return obs, total_reward, done, info
 
-        low = np.zeros(shape)
-        high = np.full(shape, 255)
-
-        observation_space = gym.spaces.Box(low=low, high=high, dtype=env.observation_space.dtype)
-        super().__init__(env, observation_space, env.action_space)
-
-    def crop(self, obs):
-        assert len(obs.shape) == 4
-        assert obs.shape[-1] == 100
-
-        res = torch.empty((len(obs),) + self.observation_space.shape).to(obs.device)
-
-        for i in range(len(obs)):
-            res[i] = obs[i, :, self.h1[i]:self.h1[i] + 84, self.w1[i]:self.w1[i] + 84]
-
-        return res
-
-    def reset_params(self, random=True):
-        if random:
-            self.w1 = torch.randint(high=17, size=(self.agents,))
-            self.h1 = torch.randint(high=17, size=(self.agents,))
-        else:
-            self.w1 = torch.full((self.agents,), 8)
-            self.h1 = torch.full((self.agents,), 8)
-
-    def step_wait(self):
-        obs, rews, news, infos = self.venv.step_wait()
-        self.last_real_obs = obs
-        obs = self.crop(obs)
-        return obs, rews, news, infos
-
-    def reset(self):
-        obs = self.venv.reset()
-        obs = self.crop(obs)
-        return obs
-
-    def get_last_real_obs(self):
-        return self.last_real_obs
-
-    def get_last_real_obs_cropped(self):
-        return self.crop(self.last_real_obs)
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
 
 
 def _make_env(
@@ -310,9 +283,14 @@ def _make_env(
         inter_area=False,
         record=False,
         rollout_length=-1,
-        gamma=0.99
+        gamma=0.99,
+        noop_max=30
 ):
-    env = atari_wrappers.make_atari(f'{env_name}NoFrameskip-v4', max_episode_steps=max_episode_steps)
+    env = gym.make(f'{env_name}NoFrameskip-v4')
+    assert 'NoFrameskip' in env.spec.id
+    env = NoopResetEnv(env, noop_max=noop_max)
+    env = SkipEnv(env, skip=4)
+    env = TimeLimit(env, max_episode_steps=max_episode_steps)
     if 'FIRE' in env.unwrapped.get_action_meanings():
         env = atari_wrappers.FireResetEnv(env)
     grayscale = frame_shape[0] == 1
@@ -327,9 +305,7 @@ def _make_env(
     return env
 
 
-def make_envs(env_name, num, device, crop=False, **kwargs):
-    if crop:  # FIXME
-        kwargs['frame_shape'] = (1, 100, 100)
+def make_envs(env_name, num, device, **kwargs):
     env_fns = [lambda: _make_env(env_name, **kwargs)]
     kwargs_no_render = kwargs.copy()
     kwargs_no_render['render'] = False
@@ -339,8 +315,6 @@ def make_envs(env_name, num, device, crop=False, **kwargs):
     else:
         env = ShmemVecEnv(env_fns)
     env = VecPytorchWrapper(env, device)
-    if crop:
-        env = CropVecEnv(env, num)
     return env
 
 

@@ -408,19 +408,14 @@ class SubprocVecEnv(_SubprocVecEnv):
 
     def step_async(self, actions):
         if self.step_count == 0:
-            res = self.env_method('get_initial_short_rollouts')
+            res = self.env_method('get_initial_frames')
 
-            initial_frames = torch.stack([entry[0] for entry in res], dim=1)
-            initial_frames = initial_frames.float() / 255
-            initial_frames = initial_frames.to(self.config.device)
+            self.frames = torch.stack(res)
+            self.frames = self.frames.float() / 255
+            self.frames = self.frames.to(self.config.device)
 
-            initial_actions = torch.stack([entry[1] for entry in res], dim=1)
-            initial_actions = initial_actions.float()
-            initial_actions = initial_actions.to(self.config.device)
-
-            self.model.warmup(initial_frames[:self.config.stacking], initial_actions[:self.config.stacking - 1])
-
-            self.frames = initial_frames[-1]
+            if self.config.stack_internal_states:
+                self.model.init_internal_states(self.config.agents)
 
         self.step_count += 1
 
@@ -428,10 +423,15 @@ class SubprocVecEnv(_SubprocVecEnv):
         with torch.no_grad():
             actions = one_hot_encode(actions, self.n_action, dtype=torch.float32)
             actions = actions.to(self.config.device)
-            states, rewards, values = self.model(self.frames, actions)
+            input_shape = (
+                self.config.agents,
+                self.config.stacking * self.config.frame_shape[0],
+                *self.config.frame_shape[1:]
+            )
+            states, rewards, values = self.model(self.frames.view(input_shape), actions)
 
             states = torch.argmax(states, dim=1)
-            self.frames = states.float() / 255
+            self.frames = torch.cat((self.frames[:, 1:], states.unsqueeze(1).float() / 255), dim=1)
             states = states.detach().cpu().byte()
             rewards = (torch.argmax(rewards, dim=1).detach().cpu() - 1).numpy().astype('float')
 
@@ -439,7 +439,7 @@ class SubprocVecEnv(_SubprocVecEnv):
                 self.step_count = 0
                 rewards += values.detach().cpu().numpy().astype('float')
 
-            done = self.config.done_on_final_rollout_step and self.step_count == self.config.rollout_length
+            done = self.step_count == self.config.rollout_length
 
             for remote, arg in zip(self.remotes, zip(states, list(rewards))):
                 arg = (*arg, done)

@@ -29,9 +29,7 @@ class PPO:
                  entropy_coef=0.01,
                  eps=1e-5,
                  max_grad_norm=0.5,
-                 ppo_epoch=4,
-                 use_wandb=False,
-                 crop = False  # FIXME
+                 ppo_epoch=4
                  ):
 
         self.env = env
@@ -40,11 +38,9 @@ class PPO:
         self.lr = lr
         self.num_steps = num_steps
         self.num_processes = self.env.num_envs
-        self.use_wandb = use_wandb
-        self.crop=crop
 
-        self.actor_critic = Policy(self.env.observation_space.shape, self.env.action_space)
-        self.actor_critic.to(self.device)
+        self.actor_critic = None
+        self.reset_actor_critic()
 
         self.agent = ppo.PPO(
             self.actor_critic,
@@ -69,7 +65,8 @@ class PPO:
             eval_agents=None,
             evaluations=10,
             graph=False,
-            score_training=True
+            score_training=True,
+            logger=None
     ):
         if eval_agents is None:
             eval_agents = self.env.num_envs
@@ -96,7 +93,7 @@ class PPO:
             iterator = range(num_updates)
 
         for j in iterator:
-            update_linear_schedule(self.agent.optimizer, j, num_updates, self.lr)
+            # update_linear_schedule(self.agent.optimizer, j, num_updates, self.lr)  # FIXME
             for step in range(self.num_steps):
                 # Sample actions
                 with torch.no_grad():
@@ -121,10 +118,6 @@ class PPO:
             rollouts.compute_returns(next_value, True, self.gamma, 0.95)
             value_loss, action_loss, dist_entropy = self.agent.update(rollouts)
 
-            if self.crop:
-                self.env.reset_params()
-                rollouts.after_update(self.env.get_last_real_obs_cropped())
-
             if (j % ceil(num_updates / evaluations) == 0 or j == num_updates - 1) and eval_env_name is not None:
                 scores = evaluate(
                     eval_policy_wrapper(self),
@@ -132,8 +125,7 @@ class PPO:
                     self.device,
                     agents=eval_agents,
                     episodes=eval_episodes,
-                    verbose=False,
-                    crop=self.crop
+                    verbose=False
                 )
                 eval_mean_scores.append(np.mean(scores))
                 eval_mean_scores_std.append(np.std(scores))
@@ -148,9 +140,8 @@ class PPO:
                 metrics.update({'mean_eval_score': eval_mean_scores[-1]})
             if verbose:
                 iterator.set_postfix(metrics)
-            if self.use_wandb:
-                import wandb
-                wandb.log(metrics)
+            if logger is not None:
+                logger.log(metrics)
 
         if graph:
             import matplotlib.pyplot as plot
@@ -192,3 +183,7 @@ class PPO:
 
     def act(self, obs, full_log_prob=False):
         return self.actor_critic.act(obs, deterministic=True, full_log_prob=full_log_prob)
+
+    def reset_actor_critic(self):
+        self.actor_critic = Policy(self.env.observation_space.shape, self.env.action_space)
+        self.actor_critic.to(self.device)

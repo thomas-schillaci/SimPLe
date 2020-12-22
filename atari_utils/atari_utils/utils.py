@@ -1,5 +1,3 @@
-import resource
-
 import torch
 from baselines import logger
 

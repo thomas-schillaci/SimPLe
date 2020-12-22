@@ -42,4 +42,5 @@ class SampleWithTemperature(PolicyWrapper):
     def act(self, obs):
         value, real_action, action_log_prob = self.agent.act(obs, full_log_prob=True)
         action = sample_with_temperature(action_log_prob, self.temperature)
+        action = action.view(real_action.shape)
         return value, action, action_log_prob
