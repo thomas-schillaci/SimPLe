@@ -203,7 +203,7 @@ class Trainer:
 
     def reward_model_generator(self, buffer, steps, n_action):
         unpacked_rewards = torch.empty((len(buffer.data), self.config.rollout_length), dtype=torch.long)
-        for i, (_, _, rewards, _, _) in enumerate(buffer.data.values()):
+        for i, (_, _, rewards, _, _) in enumerate(buffer.data):
             unpacked_rewards[i] = rewards
 
         reward_count = torch.tensor([(unpacked_rewards == i).sum() for i in range(3)], dtype=torch.float)
@@ -233,7 +233,7 @@ class Trainer:
             x = index // self.config.rollout_length
             y = index % self.config.rollout_length
 
-            sequences, b_actions, b_rewards, _, _ = list(buffer.data.values())[x]
+            sequences, b_actions, b_rewards, _, _ = list(buffer.data)[x]
             frames[i % self.config.reward_model_batch_size] = sequences[y:y + self.config.stacking]
             actions[i % self.config.reward_model_batch_size] = b_actions[y]
             rewards[i % self.config.reward_model_batch_size] = b_rewards[y]
