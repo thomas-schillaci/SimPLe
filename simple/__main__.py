@@ -146,7 +146,7 @@ class SimPLe:
 
         epochs = 15
         for epoch in trange(epochs, desc='Epoch'):
-            # self.trainer.train(epoch, self.real_env.envs[0])
+            self.trainer.train(epoch, self.real_env.envs[0])
             self.train_agent_sim_env(epoch)
             self.evaluate_agent()
             if epoch < epochs - 1:
