@@ -1,6 +1,9 @@
 import cv2
+
 # See https://stackoverflow.com/questions/54013846/pytorch-dataloader-stucked-if-using-opencv-resize-method
 # See https://github.com/pytorch/pytorch/issues/1355
+from atari_utils.buffer import Buffer
+
 cv2.setNumThreads(0)
 import gym
 import torch
@@ -131,7 +134,8 @@ class RecorderEnv(gym.Wrapper):
         self.gamma = gamma
         self.frame_stacking = frame_stacking
 
-        self.buffer = []
+        self.temp_buffer = []
+        self.buffer = Buffer()
 
         self.last_obs = None
         self.values = 0
@@ -147,38 +151,11 @@ class RecorderEnv(gym.Wrapper):
 
         self.initial_frames = None
 
-    def sample_buffer(self, batch_size=-1):
-        if not self.buffer:
-            return None
-        if self.buffer[0][-1] is None:
-            return None
+    def update_priority(self, indices, deltas):
+        self.buffer.update_deltas(indices, deltas)
 
-        if batch_size != -1:
-            sequences = []
-            actions = []
-            rewards = []
-            targets = []
-            values = []
-            for _ in range(batch_size):
-                sequence, action, reward, target, value = self.sample_buffer()
-                sequences.append(sequence)
-                actions.append(action)
-                rewards.append(reward)
-                targets.append(target)
-                values.append(value)
-            sequences = torch.stack(sequences)
-            actions = torch.stack(actions)
-            rewards = torch.stack(rewards)
-            targets = torch.stack(targets)
-            values = torch.stack(values)
-            return sequences, actions, rewards, targets, values
-
-        index = int(torch.randint(len(self.buffer), size=(1,)))
-
-        if self.buffer[index][-1] is None:
-            return self.sample_buffer()
-
-        return self.buffer[index]
+    def sample_buffer(self, n):
+        return self.buffer.sample(n)
 
     def new_epoch(self):
         self.initial_frames = None
@@ -216,7 +193,7 @@ class RecorderEnv(gym.Wrapper):
             self.targets = torch.cat((self.targets, target.unsqueeze(0)))
 
         if n == self.frame_stacking + self.rollout_length - 1:
-            self.buffer.append([self.sequence, self.actions, self.rewards, self.targets, None])
+            self.temp_buffer.append([self.sequence, self.actions, self.rewards, self.targets, None])
             self.reset_sartv()
 
     def step(self, action):
@@ -229,15 +206,16 @@ class RecorderEnv(gym.Wrapper):
                 self.current_rewards.pop()
             self.reset_sartv()
             value = 0
-            for i in range(len(self.buffer) - 1, -1, -1):
-                if self.buffer[i][-1] is not None:
-                    break
-                self.buffer[i][-1] = torch.empty((self.rollout_length,), dtype=torch.float32)
+            for i in range(len(self.temp_buffer) - 1, -1, -1):
+                self.temp_buffer[i][-1] = torch.empty((self.rollout_length,), dtype=torch.float32)
                 for j in range(self.rollout_length - 1, -1, -1):
                     r = self.current_rewards.pop()
                     assert int(r) == -1 or int(r) == 0 or int(r) == 1
                     value = r + self.gamma * value
-                    self.buffer[i][-1][j] = value
+                    self.temp_buffer[i][-1][j] = value
+            for data in self.temp_buffer:
+                self.buffer.insert(data)
+            self.temp_buffer = []
 
             assert not self.current_rewards
 

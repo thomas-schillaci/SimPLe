@@ -9,7 +9,6 @@ from a2c_ppo_acktr import ppo
 from a2c_ppo_acktr.policy import Policy
 from a2c_ppo_acktr.rollout_storage import RolloutStorage
 from a2c_ppo_acktr.utils import update_linear_schedule
-from a2c_ppo_acktr.augmentation import Augmentation
 from atari_utils.evaluation import evaluate
 from atari_utils.policy_wrappers import PolicyWrapper
 
@@ -19,7 +18,6 @@ class PPO:
     def __init__(self,
                  env,
                  device,
-                 augmentation=Augmentation(),
                  num_steps=128,
                  gamma=0.99,
                  lr=2.5e-4,
@@ -51,8 +49,7 @@ class PPO:
             entropy_coef,
             lr=lr,
             eps=eps,
-            max_grad_norm=max_grad_norm,
-            augmentation=augmentation
+            max_grad_norm=max_grad_norm
         )
 
     def learn(
@@ -66,7 +63,8 @@ class PPO:
             evaluations=10,
             graph=False,
             score_training=True,
-            logger=None
+            logger=None,
+            use_ppo_lr_decay=False
     ):
         if eval_agents is None:
             eval_agents = self.env.num_envs
@@ -93,12 +91,12 @@ class PPO:
             iterator = range(num_updates)
 
         for j in iterator:
-            # update_linear_schedule(self.agent.optimizer, j, num_updates, self.lr)  # FIXME
+            if use_ppo_lr_decay:
+                update_linear_schedule(self.agent.optimizer, j, num_updates, self.lr)
             for step in range(self.num_steps):
                 # Sample actions
                 with torch.no_grad():
-                    # value, action, action_log_prob = self.actor_critic.act(rollouts.obs[step])
-                    value, action, action_log_prob = self.actor_critic.act(self.agent.augmentation(rollouts.obs[step]))
+                    value, action, action_log_prob = self.actor_critic.act(rollouts.obs[step])
 
                 # Obser reward and next obs
                 obs, reward, done, infos = self.env.step(action)
@@ -119,7 +117,7 @@ class PPO:
             value_loss, action_loss, dist_entropy = self.agent.update(rollouts)
 
             if (j % ceil(num_updates / evaluations) == 0 or j == num_updates - 1) and eval_env_name is not None:
-                scores = evaluate(
+                eval_metrics = evaluate(  # TODO add steps tracking
                     eval_policy_wrapper(self),
                     eval_env_name,
                     self.device,
@@ -127,17 +125,17 @@ class PPO:
                     episodes=eval_episodes,
                     verbose=False
                 )
-                eval_mean_scores.append(np.mean(scores))
-                eval_mean_scores_std.append(np.std(scores))
+                eval_mean_scores.append(eval_metrics['eval_score_mean'])
+                eval_mean_scores_std.append(eval_metrics['eval_score_std'])
 
             metrics = {
                 'ppo_value_loss': float(value_loss),
                 'ppo_action_loss': float(action_loss)
             }
             if score_queue and score_training:
-                metrics.update({'mean_score': moving_average_score[-1]})
+                metrics.update({'score_mean': moving_average_score[-1]})
             if eval_mean_scores:
-                metrics.update({'mean_eval_score': eval_mean_scores[-1]})
+                metrics.update({'eval_score_mean': eval_mean_scores[-1]})
             if verbose:
                 iterator.set_postfix(metrics)
             if logger is not None:

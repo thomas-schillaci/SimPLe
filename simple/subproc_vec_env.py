@@ -439,7 +439,10 @@ class SubprocVecEnv(_SubprocVecEnv):
                 self.step_count = 0
                 rewards += values.detach().cpu().numpy().astype('float')
 
-            done = self.step_count == self.config.rollout_length
+            if self.config.done_on_last_rollout_step:
+                done = self.step_count == self.config.rollout_length
+            else:
+                done = False
 
             for remote, arg in zip(self.remotes, zip(states, list(rewards))):
                 arg = (*arg, done)
@@ -448,7 +451,12 @@ class SubprocVecEnv(_SubprocVecEnv):
 
 
 def make_simulated_env(config, model, action_space):
-    constructor = lambda i: (lambda: _make_simulated_env(config, action_space, i == 0))
+    def constructor(i):
+        def _constructor():
+            return _make_simulated_env(config, action_space, i == 0)
+
+        return _constructor
+
     env = SubprocVecEnv([constructor(i) for i in range(config.agents)], model, action_space.n, config)
     env = VecPytorchWrapper(env, config.device)
     return env

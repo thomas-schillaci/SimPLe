@@ -4,7 +4,6 @@ from time import strftime
 from warnings import warn
 
 import torch
-import numpy as np
 from tqdm import trange
 
 from atari_utils.envs import make_env
@@ -86,9 +85,9 @@ class SimPLe:
             for i in t:
                 for j in range(self.config.agents):
                     if j == self.config.agents - 1 and self.config.simulation_flip_first_random_for_beginning:
-                        initial_frames = self.real_env.envs[0].get_first_small_rollout()  # TODO sanity check
+                        initial_frames = self.real_env.envs[0].get_first_small_rollout()
                     else:
-                        sequence = self.real_env.envs[0].sample_buffer()[0]
+                        sequence = self.real_env.envs[0].sample_buffer(1)[0][0]
                         index = int(torch.randint(len(sequence) - self.config.stacking, (1,)))
                         initial_frames = sequence[index:index + self.config.stacking]
 
@@ -98,13 +97,14 @@ class SimPLe:
                     self.config.rollout_length * self.config.agents,
                     verbose=False,
                     score_training=False,
-                    logger=self.logger
+                    logger=self.logger,
+                    use_ppo_lr_decay=self.config.use_ppo_lr_decay
                 )
                 postfix.update(losses)
 
                 if eval_period > 0 and i % eval_period == 0:
-                    eval_scores = self.evaluate_agent()
-                    postfix.update({'eval_score': np.mean(eval_scores), 'eval_score_std': np.std(eval_scores)})
+                    eval_metrics = self.evaluate_agent()
+                    postfix.update(eval_metrics)
 
                 t.set_postfix(postfix)
 
@@ -112,20 +112,20 @@ class SimPLe:
             self.agent.save(os.path.join('models', 'ppo.pt'))
 
     def evaluate_agent(self):
-        scores = evaluate(
+        metrics = evaluate(
             SampleWithTemperature(self.agent),
             self.config.env_name,
             self.config.device,
             render=self.config.render_training,
             frame_shape=config.frame_shape,
-            agents=self.config.agents,
+            agents=15,
             noop_max=config.noop_max
         )
 
         if self.logger is not None:
-            self.logger.log({'eval_score': np.mean(scores), 'eval_score_std': np.std(scores)})
+            self.logger.log(metrics)
 
-        return scores
+        return metrics
 
     def load_models(self):
         self.model.load_state_dict(torch.load(os.path.join('models', 'model.pt')))
@@ -144,11 +144,13 @@ class SimPLe:
                  'or changing the environment.')
             return self.train()
 
-        for epoch in trange(15, desc='Epoch'):
-            self.trainer.train(epoch, self.real_env.envs[0])
+        epochs = 15
+        for epoch in trange(epochs, desc='Epoch'):
+            # self.trainer.train(epoch, self.real_env.envs[0])
             self.train_agent_sim_env(epoch)
             self.evaluate_agent()
-            self.collect_interactions()
+            if epoch < epochs - 1:
+                self.collect_interactions()
 
         self.real_env.close()
         self.simulated_env.close()
@@ -167,13 +169,13 @@ class SimPLe:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--agents', type=int, default=16)
-    parser.add_argument('--agent-evaluation-epochs', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=4)
     parser.add_argument('--bottleneck-bits', type=int, default=128)
     parser.add_argument('--bottleneck-noise', type=float, default=0.1)
     parser.add_argument('--clip-grad-norm', type=float, default=1.0)
     parser.add_argument('--compress-steps', type=int, default=5)
     parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--done-on-last-rollout-step', default=True, action='store_false')
     parser.add_argument('--dropout', type=float, default=0.15)
     parser.add_argument('--env-name', type=str, default='Freeway')
     parser.add_argument('--experiment-name', type=str, default=strftime('%d-%m-%y-%H:%M:%S'))
@@ -201,8 +203,9 @@ if __name__ == '__main__':
     parser.add_argument('--stacking', type=float, default=4)
     parser.add_argument('--stack-internal-states', default=True, action='store_false')  # TODO benchmark me
     parser.add_argument('--target-loss-clipping', type=float, default=0.03)
+    parser.add_argument('--use-ppo-lr-decay', default=False, action='store_true')
+    parser.add_argument('--use-stochastic-model', default=True, action='store_false')
     parser.add_argument('--use-wandb', default=False, action='store_true')
-    parser.add_argument('--value-model-batch-size', type=int, default=16)
     config = parser.parse_args()
 
     print_config(config)
@@ -217,4 +220,4 @@ if __name__ == '__main__':
         simple.load_models()
     else:
         simple.train()
-    simple.test()
+    # simple.test()

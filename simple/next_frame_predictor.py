@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import truncnorm
 
-from atari_utils.utils import one_hot_encode
+from atari_utils.utils import one_hot_encode, sample_with_temperature
 from simple.utils import MeanAttention, ActionInjector, standardize_frame, get_timing_signal_nd, mix, Container, \
-    bit_to_int, sample_with_temperature, int_to_bit, ParameterSealer
+    bit_to_int, int_to_bit, ParameterSealer
 
 
 class RewardEstimator(nn.Module):
@@ -223,6 +223,7 @@ class NextFramePredictor(Container):
 
         # Model
         self.input_embedding = nn.Conv2d(channels, self.config.hidden_size, 1)
+        nn.init.normal_(self.input_embedding.bias, std=0.01)
 
         self.downscale_layers = []
         shape = list(self.config.frame_shape)
@@ -268,9 +269,12 @@ class NextFramePredictor(Container):
 
         # Sub-models
         self.middle_network = MiddleNetwork(self.config, middle_shape[0])
-        self.reward_estimator = ParameterSealer(RewardEstimator(self.config, middle_shape[0] + filters))
+        self.reward_estimator = RewardEstimator(self.config, middle_shape[0] + filters)
         self.value_estimator = ValueEstimator(middle_shape[0] * middle_shape[1] * middle_shape[2])
-        self.stochastic_model = StochasticModel(self.config, middle_shape, n_action)
+        if self.config.use_stochastic_model:
+            self.stochastic_model = StochasticModel(self.config, middle_shape, n_action)
+        else:
+            self.stochastic_model = None
 
     def init_internal_states(self, batch_size):
         self.internal_states = torch.zeros(
@@ -322,10 +326,10 @@ class NextFramePredictor(Container):
             for batch_index in range(len(target)):
                 target[batch_index] = standardize_frame(target[batch_index])
 
-        x = self.stochastic_model(x, x_start, action, target, epsilon)
+        if self.config.use_stochastic_model:
+            x = self.stochastic_model(x, x_start, action, target, epsilon)
 
         x_mid = torch.mean(x, dim=(2, 3))
-
         x = self.middle_network(x)
 
         inputs = list(reversed(inputs))

@@ -59,9 +59,9 @@ class MeanAttention(nn.Module):
 
 
 class ParameterSealer:
-    '''
+    """
     Used to hide sub-module's parameters
-    '''
+    """
 
     def __init__(self, module):
         self.module = module
@@ -103,14 +103,6 @@ class ActionInjector(nn.Module):
         mask = mask.view((-1, x.shape[1], 1, 1))
         x = x + mask
         return x
-
-
-def sample_with_temperature(logits, temperature):
-    reshaped_logits = logits.view((-1, logits.shape[-1])) / temperature
-    reshaped_logits = torch.exp(reshaped_logits)
-    choices = torch.multinomial(reshaped_logits, 1)
-    choices = choices.view((logits.shape[:len(logits.shape) - 1]))
-    return choices
 
 
 def bit_to_int(x_bit, num_bits):
@@ -163,9 +155,9 @@ def get_timing_signal_nd(shape, min_timescale=1.0, max_timescale=1.0e4):
 
 
 def mix(x1, x2, epsilon):
-    '''
+    """
     Returns ~ x1 * (1 - epsilon) + x2 * epsilon
-    '''
+    """
     mask = torch.rand_like(x1)
     mask = (mask < epsilon).float()
     return (1 - mask) * x1 + mask * x2
