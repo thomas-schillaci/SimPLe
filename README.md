@@ -82,6 +82,6 @@ The scores* obtained with this implementation are detailed in the following tabl
 | Freeway | 20.3 | 20.3 | 100.0% |
 | Kangaroo (deterministic) | 466.7 | 481.9 | 96.8% |
 | Krull | 3418.2 | 4539.9 | 82.6% |
-| KungFuMaster | N/A | 17257.2 | N/A |
+| MsPacman | 681.3 | 762.8 | 89.3% | 
 
 **Scores obtained on only one full training per environment. More numbers to come.*
