@@ -79,6 +79,7 @@ The scores* obtained with this implementation are detailed in the following tabl
 
 | Environment | Score | Paper's score | % of reported score in the original paper |
 | ----------- | ---:  | ---:          | ---:                                      |
+| Alien | 558 | 405.2 | 137.7% |
 | Freeway | 22.1 | 20.3 | 108.9% |
 | Kangaroo (deterministic) | 466.7 | 481.9 | 96.8% |
 | Krull | 3418.2 | 4539.9 | 82.6% |
