@@ -5,7 +5,7 @@ from scipy.stats import truncnorm
 
 from atari_utils.utils import one_hot_encode, sample_with_temperature
 from simple.utils import MeanAttention, ActionInjector, standardize_frame, get_timing_signal_nd, mix, Container, \
-    bit_to_int, int_to_bit, ParameterSealer
+    bit_to_int, int_to_bit
 
 
 class RewardEstimator(nn.Module):
@@ -131,6 +131,9 @@ class StochasticModel(nn.Module):
         self.lstm_loss = None
         self.get_lstm_loss()
 
+        self.timing_signal = get_timing_signal_nd((self.config.hidden_size, *self.config.frame_shape[1:])) \
+            .to(self.config.device)
+
         self.input_embedding = nn.Conv2d(channels, self.config.hidden_size, 1)
         self.conv1 = nn.Conv2d(self.config.hidden_size, filters[0], 8, 4, padding=2)
         self.conv2 = nn.Conv2d(filters[0], filters[1], 8, 4, padding=2)
@@ -159,7 +162,7 @@ class StochasticModel(nn.Module):
         if self.training and target is not None:
             x = torch.cat((inputs, target), dim=1)
             x = self.input_embedding(x)
-            x = x + get_timing_signal_nd(x.shape).to(self.config.device)
+            x = x + self.timing_signal
 
             x = self.action_injector(x, action)
 
@@ -222,17 +225,20 @@ class NextFramePredictor(Container):
             self.gate = nn.Conv2d(channels, 2 * self.config.recurrent_state_size, 3, padding=1)
 
         # Model
+        self.timing_signals = []
         self.input_embedding = nn.Conv2d(channels, self.config.hidden_size, 1)
         nn.init.normal_(self.input_embedding.bias, std=0.01)
 
         self.downscale_layers = []
-        shape = list(self.config.frame_shape)
+        shape = [self.config.hidden_size, *self.config.frame_shape[1:]]
+        self.timing_signals.append(get_timing_signal_nd(shape).to(self.config.device))
         shapes = [shape]
         for i in range(self.config.compress_steps):
             in_filters = filters
             if i < self.config.filter_double_steps:
                 filters *= 2
 
+            self.timing_signals.append(get_timing_signal_nd(shape).to(self.config.device))
             shape = [filters, shape[1] // 2, shape[2] // 2]
             shapes.append(shape)
 
@@ -261,6 +267,7 @@ class NextFramePredictor(Container):
                 in_filters, filters, 4, stride=2, padding=1, output_padding=output_padding
             ))
             self.upscale_layers.append(nn.InstanceNorm2d(filters, affine=True, eps=1e-6))
+            self.timing_signals.append(get_timing_signal_nd(shape).to(self.config.device))
 
         self.upscale_layers = nn.ModuleList(self.upscale_layers)
         self.action_injectors = nn.ModuleList(self.action_injectors)
@@ -307,13 +314,13 @@ class NextFramePredictor(Container):
             x = x_start
 
         x = self.input_embedding(x)
-        x = x + get_timing_signal_nd(x.shape).to(self.config.device)
+        x = x + self.timing_signals[0]
 
         inputs = []
         for i in range(self.config.compress_steps):
             inputs.append(x)
             x = F.dropout(x, self.config.dropout)
-            x = x + get_timing_signal_nd(x.shape).to(self.config.device)
+            x = x + self.timing_signals[i + 1]
             x = self.downscale_layers[2 * i](x)  # Conv
             x = F.relu(x)
             x = self.downscale_layers[2 * i + 1](x)  # LayerNorm
@@ -340,7 +347,7 @@ class NextFramePredictor(Container):
             x = F.relu(x)
             x = x + inputs[i]
             x = self.upscale_layers[2 * i + 1](x)  # LayerNorm
-            x = x + get_timing_signal_nd(x.shape).to(self.config.device)
+            x = x + self.timing_signals[1 + self.config.compress_steps + i]
 
         x_fin = torch.mean(x, dim=(2, 3))
 

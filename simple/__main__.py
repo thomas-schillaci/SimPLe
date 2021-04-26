@@ -30,7 +30,6 @@ class SimPLe:
             render=config.render_training,
             frame_shape=config.frame_shape,
             record=True,
-            rollout_length=50,
             gamma=config.ppo_gamma,
             noop_max=config.noop_max
         )
@@ -48,18 +47,18 @@ class SimPLe:
 
         if self.config.use_wandb:
             import wandb
-            wandb.init(project='msth', name=self.config.experiment_name, config=config)
+            wandb.init(project='SimPLe', name=self.config.experiment_name, config=config)
             wandb.watch(self.model)
 
     def random_search(self):
         self.real_env.reset()
-        for _ in trange(6400, desc='Collecting interactions'):
+        for _ in trange(6400, desc='Random exploration'):
             done = self.real_env.step(torch.randint(high=self.real_env.action_space.n, size=(1, 1)))[2]
             if done:
                 self.real_env.reset()
 
     def collect_interactions(self):
-        self.real_env.envs[0].new_epoch()
+        self.real_env.new_epoch()
         self.agent.set_env(self.real_env)
         agent = SampleWithTemperature(self.agent, temperature=1.0)
         obs = self.real_env.reset()
@@ -85,11 +84,9 @@ class SimPLe:
             for i in t:
                 for j in range(self.config.agents):
                     if j == self.config.agents - 1 and self.config.simulation_flip_first_random_for_beginning:
-                        initial_frames = self.real_env.envs[0].get_first_small_rollout()
+                        initial_frames = self.real_env.get_first_small_rollout()
                     else:
-                        sequence = self.real_env.envs[0].sample_buffer(1)[0][0]
-                        index = int(torch.randint(len(sequence) - self.config.stacking, (1,)))
-                        initial_frames = sequence[index:index + self.config.stacking]
+                        initial_frames = self.real_env.sample_buffer(1)[0][0]
 
                     self.simulated_env.env_method('restart', initial_frames, indices=j)
 
@@ -102,7 +99,7 @@ class SimPLe:
                 )
                 postfix.update(losses)
 
-                if eval_period > 0 and i % eval_period == 0:
+                if eval_period > 0 and (i + 1) % eval_period == 0:
                     eval_metrics = self.evaluate_agent()
                     postfix.update(eval_metrics)
 
@@ -136,7 +133,7 @@ class SimPLe:
     def train(self):
         self.random_search()
 
-        if not self.real_env.envs[0].buffer:
+        if not self.real_env.buffer:
             self.__init__(self.config)
             warn('The agent was not able to collect even one full rollout in the real environment.\n'
                  'Restarting the training.\n'
@@ -146,24 +143,12 @@ class SimPLe:
 
         epochs = 15
         for epoch in trange(epochs, desc='Epoch'):
-            self.trainer.train(epoch, self.real_env.envs[0])
+            self.collect_interactions()
+            self.trainer.train(epoch, self.real_env)
             self.train_agent_sim_env(epoch)
-            self.evaluate_agent()
-            if epoch < epochs - 1:
-                self.collect_interactions()
 
         self.real_env.close()
         self.simulated_env.close()
-
-    def test(self):
-        evaluate(
-            SampleWithTemperature(self.agent),
-            self.config.env_name,
-            self.config.device,
-            render=self.config.render_evaluation,
-            frame_shape=config.frame_shape,
-            agents=self.config.agents
-        )
 
 
 if __name__ == '__main__':
@@ -195,13 +180,12 @@ if __name__ == '__main__':
     parser.add_argument('--render-evaluation', default=False, action='store_true')
     parser.add_argument('--render-training', default=False, action='store_true')
     parser.add_argument('--residual-dropout', type=float, default=0.5)
-    parser.add_argument('--reward-model-batch-size', type=int, default=16)
     parser.add_argument('--rollout-length', type=int, default=50)
     parser.add_argument('--save-models', default=False, action='store_true')
-    parser.add_argument('--scheduled-sampling-decay-steps', type=int, default=22250)  # TODO benchmark me vs 40000
+    parser.add_argument('--scheduled-sampling-decay-steps', type=int, default=22250)
     parser.add_argument('--simulation-flip-first-random-for-beginning', default=True, action='store_false')
     parser.add_argument('--stacking', type=float, default=4)
-    parser.add_argument('--stack-internal-states', default=True, action='store_false')  # TODO benchmark me
+    parser.add_argument('--stack-internal-states', default=True, action='store_false')
     parser.add_argument('--target-loss-clipping', type=float, default=0.03)
     parser.add_argument('--use-ppo-lr-decay', default=False, action='store_true')
     parser.add_argument('--use-stochastic-model', default=True, action='store_false')
@@ -220,4 +204,3 @@ if __name__ == '__main__':
         simple.load_models()
     else:
         simple.train()
-    # simple.test()

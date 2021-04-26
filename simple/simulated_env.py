@@ -12,13 +12,15 @@ class SimulatedEnv(Env):
         super(SimulatedEnv, self).__init__()
         self.config = config
         self.action_space = action_space
-        self.observation_space = spaces.Box(low=0, high=255, shape=self.config.frame_shape, dtype=np.uint8)
+        shape = list(self.config.frame_shape)
+        shape[0] *= self.config.stacking
+        self.observation_space = spaces.Box(low=0, high=255, shape=shape, dtype=np.uint8)
         self.initial_frames = None
         self.last_state = None
         self.main = main
 
     def get_initial_frames(self):
-        return self.initial_frames
+        return self.initial_frames.cpu()
 
     def step(self, args):
         state, reward, done = args
@@ -33,16 +35,15 @@ class SimulatedEnv(Env):
     def reset(self):
         if self.initial_frames is None:
             raise ValueError('This environment has not been initialized. Call the restart function.')
-        return self.initial_frames[-1].cpu().detach()
+        return self.initial_frames.cpu()
 
     def render(self, mode='human'):
         if self.last_state is None:
             return
 
-        frame = self.last_state
+        frame = self.last_state[-3:]
         frame = frame.permute((1, 2, 0))
-        if frame.shape[-1] == 3:
-            frame = frame[:, :, [2, 1, 0]]
+        frame = frame[:, :, [2, 1, 0]]
         frame = frame.detach().cpu().numpy()
         cv2.namedWindow('World model', cv2.WINDOW_NORMAL)
         cv2.imshow('World model', frame)
@@ -50,7 +51,10 @@ class SimulatedEnv(Env):
 
     def close(self):
         super().close()
-        cv2.destroyWindow('World model')
+        try:
+            cv2.destroyWindow('World model')
+        except:
+            pass
 
     def restart(self, initial_frames):
         self.initial_frames = initial_frames

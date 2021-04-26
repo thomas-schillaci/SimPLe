@@ -419,35 +419,30 @@ class SubprocVecEnv(_SubprocVecEnv):
 
         self.step_count += 1
 
+        actions = one_hot_encode(actions, self.n_action, dtype=torch.float32)
+        actions = actions.to(self.config.device)
         self.model.eval()
         with torch.no_grad():
-            actions = one_hot_encode(actions, self.n_action, dtype=torch.float32)
-            actions = actions.to(self.config.device)
-            input_shape = (
-                self.config.agents,
-                self.config.stacking * self.config.frame_shape[0],
-                *self.config.frame_shape[1:]
-            )
-            states, rewards, values = self.model(self.frames.view(input_shape), actions)
+            new_states, rewards, values = self.model(self.frames, actions)
 
-            states = torch.argmax(states, dim=1)
-            self.frames = torch.cat((self.frames[:, 1:], states.unsqueeze(1).float() / 255), dim=1)
-            states = states.detach().cpu().byte()
-            rewards = (torch.argmax(rewards, dim=1).detach().cpu() - 1).numpy().astype('float')
+        new_states = torch.argmax(new_states, dim=1)
+        self.frames = torch.cat((self.frames[:, 3:], new_states.float() / 255), dim=1)
+        new_states = (self.frames * 255).byte().detach().cpu()
+        rewards = (torch.argmax(rewards, dim=1).detach().cpu() - 1).numpy().astype('float')
 
-            if self.step_count == self.config.rollout_length:
-                self.step_count = 0
-                rewards += values.detach().cpu().numpy().astype('float')
+        if self.step_count == self.config.rollout_length:
+            self.step_count = 0
+            rewards += values.detach().cpu().numpy().astype('float')
 
-            if self.config.done_on_last_rollout_step:
-                done = self.step_count == self.config.rollout_length
-            else:
-                done = False
+        if self.config.done_on_last_rollout_step:
+            done = self.step_count == self.config.rollout_length
+        else:
+            done = False
 
-            for remote, arg in zip(self.remotes, zip(states, list(rewards))):
-                arg = (*arg, done)
-                remote.send(('step', arg))
-            self.waiting = True
+        for remote, arg in zip(self.remotes, zip(new_states, list(rewards))):
+            arg = (*arg, done)
+            remote.send(('step', arg))
+        self.waiting = True
 
 
 def make_simulated_env(config, model, action_space):
@@ -458,5 +453,5 @@ def make_simulated_env(config, model, action_space):
         return _constructor
 
     env = SubprocVecEnv([constructor(i) for i in range(config.agents)], model, action_space.n, config)
-    env = VecPytorchWrapper(env, config.device)
+    env = VecPytorchWrapper(env, config.device, nstack=1)
     return env

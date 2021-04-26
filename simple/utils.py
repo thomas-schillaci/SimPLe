@@ -3,6 +3,36 @@ from torch import nn as nn
 from torch.nn import functional as F
 
 
+class ParameterSealer:
+    """
+    Used to hide sub-module's parameters
+    """
+
+    def __init__(self, module):
+        self.module = module
+
+    def __call__(self, *args, **kwargs):
+        return self.module.forward(*args, **kwargs)
+
+    def parameters(self, recurse=True):
+        return self.module.parameters(recurse)
+
+    def to(self, device):
+        self.module.to(device)
+
+    def train(self, mode=True):
+        self.module.train(mode)
+
+    def eval(self):
+        self.module.eval()
+
+    def state_dict(self):
+        return self.module.state_dict()
+
+    def load_state_dict(self, state_dict):
+        self.module.load_state_dict(state_dict)
+
+
 class Container(nn.Module):
 
     def __init__(self):
@@ -58,36 +88,6 @@ class MeanAttention(nn.Module):
         return self.dense(l)
 
 
-class ParameterSealer:
-    """
-    Used to hide sub-module's parameters
-    """
-
-    def __init__(self, module):
-        self.module = module
-
-    def __call__(self, *args, **kwargs):
-        return self.module.forward(*args, **kwargs)
-
-    def parameters(self, recurse=True):
-        return self.module.parameters(recurse)
-
-    def to(self, device):
-        self.module.to(device)
-
-    def train(self, mode=True):
-        self.module.train(mode)
-
-    def eval(self):
-        self.module.eval()
-
-    def state_dict(self):
-        return self.module.state_dict()
-
-    def load_state_dict(self, state_dict):
-        self.module.load_state_dict(state_dict)
-
-
 class ActionInjector(nn.Module):
 
     def __init__(self, n_action, size):
@@ -127,7 +127,7 @@ def standardize_frame(x):
 
 
 def get_timing_signal_nd(shape, min_timescale=1.0, max_timescale=1.0e4):
-    channels = shape[1]
+    channels = shape[0]
     num_timescales = channels // 4
     log_timescale_increment = (torch.log(torch.tensor(float(max_timescale) / float(min_timescale)))
                                / (torch.tensor(num_timescales, dtype=torch.float32) - 1))
@@ -135,10 +135,10 @@ def get_timing_signal_nd(shape, min_timescale=1.0, max_timescale=1.0e4):
         torch.arange(num_timescales, dtype=torch.float32) * -log_timescale_increment
     )
 
-    res = torch.zeros(shape).cpu()
+    res = torch.zeros(shape)
 
     for dim in range(2):
-        length = shape[dim + 2]
+        length = shape[dim + 1]
         position = torch.arange(length, dtype=torch.float32)
         scaled_time = position.unsqueeze(1) * inv_timescales.unsqueeze(0)
         signal = torch.cat((torch.sin(scaled_time), torch.cos(scaled_time)), dim=1)

@@ -35,7 +35,10 @@ class PPO:
         self.gamma = gamma
         self.lr = lr
         self.num_steps = num_steps
-        self.num_processes = self.env.num_envs
+        if hasattr(self.env, 'num_envs'):
+            self.num_processes = self.env.num_envs
+        else:
+            self.num_processes = 1
 
         self.actor_critic = None
         self.reset_actor_critic()

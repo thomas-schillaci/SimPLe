@@ -2,9 +2,8 @@ import cv2
 
 # See https://stackoverflow.com/questions/54013846/pytorch-dataloader-stucked-if-using-opencv-resize-method
 # See https://github.com/pytorch/pytorch/issues/1355
-from atari_utils.buffer import Buffer
-
 cv2.setNumThreads(0)
+
 import gym
 import torch
 from baselines.common import atari_wrappers
@@ -61,9 +60,32 @@ class RenderingEnv(gym.ObservationWrapper):
         return observation
 
 
+class ClipRewardEnv(gym.RewardWrapper):
+
+    def __init__(self, env):
+        super().__init__(env)
+        self.cum_reward = 0
+
+    def reset(self, **kwargs):
+        self.cum_reward = 0
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        observation, reward, done, info = self.env.step(action)
+        self.cum_reward += reward
+        if done:
+            info['r'] = self.cum_reward
+            self.cum_reward = 0
+        return observation, self.reward(reward), done, info
+
+    def reward(self, reward):
+        return (reward > 0) - (reward < 0)
+
+
 # Derived from
 # https://github.com/openai/baselines/blob/master/baselines/common/vec_env/vec_frame_stack.py
 class VecPytorchWrapper(VecEnvWrapper):
+
     def __init__(self, venv, device, nstack=4):
         self.venv = venv
         self.device = device
@@ -103,130 +125,83 @@ class VecPytorchWrapper(VecEnvWrapper):
         return self.stacked_obs
 
 
-class ClipRewardEnv(gym.RewardWrapper):
+class VecRecorderWrapper(VecEnvWrapper):
 
-    def __init__(self, env):
-        super().__init__(env)
-        self.cum_reward = 0
-
-    def reset(self, **kwargs):
-        self.cum_reward = 0
-        return self.env.reset(**kwargs)
-
-    def step(self, action):
-        observation, reward, done, info = self.env.step(action)
-        self.cum_reward += reward
-        if done:
-            info['r'] = self.cum_reward
-            self.cum_reward = 0
-        return observation, self.reward(reward), done, info
-
-    def reward(self, reward):
-        return (reward > 0) - (reward < 0)
-
-
-class RecorderEnv(gym.Wrapper):
-
-    def __init__(self, env, frame_shape, rollout_length, gamma, frame_stacking=4):
-        super().__init__(env)
-        self.frame_shape = frame_shape
-        self.rollout_length = rollout_length
+    def __init__(self, venv, gamma, stacking):
+        super().__init__(venv)
+        self.venv = venv
         self.gamma = gamma
-        self.frame_stacking = frame_stacking
+        self.stacking = stacking
 
-        self.temp_buffer = []
-        self.buffer = Buffer()
+        assert self.venv.num_envs == 1
 
-        self.last_obs = None
-        self.values = 0
-
-        self.sequence = None
-        self.actions = None
-        self.rewards = None
-        self.targets = None
-        self.values = None
-        self.reset_sartv()
-
-        self.current_rewards = []
-
+        self.buffer = []
+        self.obs = None
         self.initial_frames = None
-
-    def update_priority(self, indices, deltas):
-        self.buffer.update_deltas(indices, deltas)
-
-    def sample_buffer(self, n):
-        return self.buffer.sample(n)
 
     def new_epoch(self):
         self.initial_frames = None
 
     def get_first_small_rollout(self):
-        assert len(self.initial_frames) == self.frame_stacking
         return self.initial_frames
 
-    def reset_sartv(self):
-        self.sequence = torch.empty((0, *self.frame_shape), dtype=torch.uint8)
-        self.actions = torch.empty((0, self.action_space.n), dtype=torch.uint8)
-        self.rewards = torch.empty((0,), dtype=torch.uint8)
-        self.targets = torch.empty((0, *self.frame_shape), dtype=torch.uint8)
-        self.values = torch.empty((0,), dtype=torch.float32)
+    def add_interaction(self, action, reward, new_obs, done):
+        obs = self.obs.squeeze().byte()
+        action = one_hot_encode(action.squeeze(), self.action_space.n)
+        reward = (reward.squeeze() + 1).byte()
+        new_obs = new_obs.squeeze().byte()
+        new_obs = new_obs[-len(new_obs) // self.stacking:]
+        done = torch.tensor(done[0], dtype=torch.uint8)
+        self.buffer.append([obs, action, reward, new_obs, done, None])
 
-    def add_interaction(self, last_obs, action, obs, reward):
-        last_state = last_obs.clone().detach().byte()
-        self.sequence = torch.cat((self.sequence, last_state.unsqueeze(0)))
+    def sample_buffer(self, batch_size):
+        if self.buffer[0][5] is None:
+            return None
 
-        n = len(self.sequence)
+        samples = self.buffer[0]
+        data = [torch.empty((batch_size, *sample.shape), dtype=sample.dtype) for sample in samples]
 
-        if n == self.frame_stacking and self.initial_frames is None:
-            self.initial_frames = self.sequence
+        for i in range(batch_size):
+            value = None
+            while value is None:
+                index = int(torch.randint(len(self.buffer), size=(1,)))
+                samples = self.buffer[index]
+                value = samples[5]
+            for j in range(len(data)):
+                data[j][i] = samples[j]
 
-        if n >= self.frame_stacking:
-            action = one_hot_encode(action, self.action_space.n)
-            self.actions = torch.cat((self.actions, action))
-
-            self.current_rewards.append(reward)
-            reward = reward + 1  # Convert to {0; 1; 2}
-            reward = torch.tensor(reward, dtype=torch.uint8)
-            self.rewards = torch.cat((self.rewards, reward.unsqueeze(0)))
-
-            target = obs.clone().detach().byte()
-            self.targets = torch.cat((self.targets, target.unsqueeze(0)))
-
-        if n == self.frame_stacking + self.rollout_length - 1:
-            self.temp_buffer.append([self.sequence, self.actions, self.rewards, self.targets, None])
-            self.reset_sartv()
-
-    def step(self, action):
-        obs, reward, done, info = super().step(action)
-
-        self.add_interaction(self.last_obs, action, obs, reward)
-
-        if done:
-            for _ in range(len(self.rewards)):
-                self.current_rewards.pop()
-            self.reset_sartv()
-            value = 0
-            for i in range(len(self.temp_buffer) - 1, -1, -1):
-                self.temp_buffer[i][-1] = torch.empty((self.rollout_length,), dtype=torch.float32)
-                for j in range(self.rollout_length - 1, -1, -1):
-                    r = self.current_rewards.pop()
-                    assert int(r) == -1 or int(r) == 0 or int(r) == 1
-                    value = r + self.gamma * value
-                    self.temp_buffer[i][-1][j] = value
-            for data in self.temp_buffer:
-                self.buffer.insert(data)
-            self.temp_buffer = []
-
-            assert not self.current_rewards
-
-        self.last_obs = obs
-
-        return obs, reward, done, info
+        return data
 
     def reset(self):
-        obs = super().reset()
-        self.last_obs = obs
-        return obs
+        self.obs = self.venv.reset()
+        for _ in range(self.stacking - 1):
+            self.obs = self.venv.step(torch.tensor(0))[0].clone()
+        if self.initial_frames is None:
+            self.initial_frames = self.obs[0]
+        return self.obs
+
+    def step(self, action):
+        new_obs, reward, done, infos = self.venv.step(action)
+
+        self.add_interaction(action, reward, new_obs, done)
+
+        if done:
+            value = torch.tensor(0.).to(new_obs)
+            self.buffer[-1][5] = value
+            index = len(self.buffer) - 2
+            while reversed(range(len(self.buffer) - 1)):
+                value = (self.buffer[index][2] - 1) + self.gamma * value
+                self.buffer[index][5] = value
+                index -= 1
+                if self.buffer[index][4] == 1:
+                    break
+
+        self.obs = new_obs.clone()
+
+        return new_obs, reward, done, infos
+
+    def step_wait(self):
+        return self.venv.step_wait()
 
 
 class SkipEnv(gym.Wrapper):
@@ -259,9 +234,6 @@ def _make_env(
         max_episode_steps=18000,
         frame_shape=(1, 84, 84),
         inter_area=False,
-        record=False,
-        rollout_length=-1,
-        gamma=0.99,
         noop_max=30
 ):
     env = gym.make(f'{env_name}NoFrameskip-v4')
@@ -277,13 +249,10 @@ def _make_env(
     env = ClipRewardEnv(env)
     if render:
         env = RenderingEnv(env)
-    if record:
-        assert rollout_length > 0
-        env = RecorderEnv(env, frame_shape, rollout_length, gamma)
     return env
 
 
-def make_envs(env_name, num, device, **kwargs):
+def make_envs(env_name, num, device, stacking=4, record=False, gamma=0.99, **kwargs):
     env_fns = [lambda: _make_env(env_name, **kwargs)]
     kwargs_no_render = kwargs.copy()
     kwargs_no_render['render'] = False
@@ -292,7 +261,9 @@ def make_envs(env_name, num, device, **kwargs):
         env = DummyVecEnv(env_fns)
     else:
         env = ShmemVecEnv(env_fns)
-    env = VecPytorchWrapper(env, device)
+    env = VecPytorchWrapper(env, device, nstack=stacking)
+    if record:
+        env = VecRecorderWrapper(env, gamma, stacking)
     return env
 
 
