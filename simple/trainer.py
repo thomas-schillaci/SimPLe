@@ -93,7 +93,7 @@ class Trainer:
             frames = frames.to(self.config.device)
 
             for j in range(self.config.batch_size):
-                frames[j] = env.buffer[indices[j]][0]
+                frames[j] = env.buffer[indices[j]][0].clone()
 
             frames = preprocess_state(frames)
 

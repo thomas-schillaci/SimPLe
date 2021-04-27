@@ -191,7 +191,7 @@ class VecRecorderWrapper(VecEnvWrapper):
             self.buffer[-1][5] = value
             index = len(self.buffer) - 2
             while reversed(range(len(self.buffer) - 1)):
-                value = (self.buffer[index][2] - 1) + self.gamma * value
+                value = (self.buffer[index][2] - 1).to(self.device) + self.gamma * value
                 self.buffer[index][5] = value
                 index -= 1
                 if self.buffer[index][4] == 1:
