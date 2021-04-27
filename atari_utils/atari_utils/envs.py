@@ -127,11 +127,12 @@ class VecPytorchWrapper(VecEnvWrapper):
 
 class VecRecorderWrapper(VecEnvWrapper):
 
-    def __init__(self, venv, gamma, stacking):
+    def __init__(self, venv, gamma, stacking, device):
         super().__init__(venv)
         self.venv = venv
         self.gamma = gamma
         self.stacking = stacking
+        self.device = device
 
         assert self.venv.num_envs == 1
 
@@ -146,12 +147,12 @@ class VecRecorderWrapper(VecEnvWrapper):
         return self.initial_frames
 
     def add_interaction(self, action, reward, new_obs, done):
-        obs = self.obs.squeeze().byte()
-        action = one_hot_encode(action.squeeze(), self.action_space.n)
-        reward = (reward.squeeze() + 1).byte()
+        obs = self.obs.squeeze().byte().to(self.device)
+        action = one_hot_encode(action.squeeze(), self.action_space.n).to(self.device)
+        reward = (reward.squeeze() + 1).byte().to(self.device)
         new_obs = new_obs.squeeze().byte()
-        new_obs = new_obs[-len(new_obs) // self.stacking:]
-        done = torch.tensor(done[0], dtype=torch.uint8)
+        new_obs = new_obs[-len(new_obs) // self.stacking:].to(self.device)
+        done = torch.tensor(done[0], dtype=torch.uint8).to(self.device)
         self.buffer.append([obs, action, reward, new_obs, done, None])
 
     def sample_buffer(self, batch_size):
@@ -186,7 +187,7 @@ class VecRecorderWrapper(VecEnvWrapper):
         self.add_interaction(action, reward, new_obs, done)
 
         if done:
-            value = torch.tensor(0.).to(new_obs)
+            value = torch.tensor(0.).to(self.device)
             self.buffer[-1][5] = value
             index = len(self.buffer) - 2
             while reversed(range(len(self.buffer) - 1)):
@@ -252,7 +253,7 @@ def _make_env(
     return env
 
 
-def make_envs(env_name, num, device, stacking=4, record=False, gamma=0.99, **kwargs):
+def make_envs(env_name, num, device, stacking=4, record=False, gamma=0.99, buffer_device='cpu', **kwargs):
     env_fns = [lambda: _make_env(env_name, **kwargs)]
     kwargs_no_render = kwargs.copy()
     kwargs_no_render['render'] = False
@@ -263,7 +264,7 @@ def make_envs(env_name, num, device, stacking=4, record=False, gamma=0.99, **kwa
         env = ShmemVecEnv(env_fns)
     env = VecPytorchWrapper(env, device, nstack=stacking)
     if record:
-        env = VecRecorderWrapper(env, gamma, stacking)
+        env = VecRecorderWrapper(env, gamma, stacking, buffer_device)
     return env
 
 
