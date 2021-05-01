@@ -24,9 +24,7 @@ class Trainer:
         self.model_step = 1
         self.reward_step = 1
 
-    def train(self, epoch, env):
-        steps = 15000
-
+    def train(self, epoch, env, steps=15000):
         if epoch == 0:
             steps *= 3
 

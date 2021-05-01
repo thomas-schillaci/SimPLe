@@ -10,7 +10,7 @@ Based on the paper [Model-Based Reinforcement Learning for Atari](https://arxiv.
 
 ![World model predictions on freeway](simple/res/freeway_wm.gif)
 
-*SimPLe predicting 46 frames in the future from 4 initial frames on Freeway.*
+*SimPLe predicting 50 frames into the future from 4 initial frames on Freeway.*
 
 ## Installation
 
@@ -62,10 +62,8 @@ The following boolean flags are set to `False` if not passed to the command line
 
 | Flag | Description |
 | ---- | ----------- |
-| --load-models | Loads models from `simple/models/` and bypasses training |
 | --render-evaluation | Renders the environments during evaluation |
 | --render-training | Renders the environments during training |
-| --save-models | Save the models after each epoch |
 | --use-wandb | Enables [wandb](https://www.wandb.com/) to track the experiment |
 
 For example, to run the program without CUDA and to render the environments during training, run:
@@ -86,4 +84,5 @@ The scores* obtained with this implementation are detailed in the following tabl
 | Krull | 3418.2 | 4539.9 | 82.6% |
 | MsPacman | 681.3 | 762.8 | 89.3% | 
 
-**Scores obtained on only one full training per environment. More numbers to come.*
+**Scores obtained on only one full training per environment.
+ The scores are the maximum average cumulative reward obtained in the real environment.*

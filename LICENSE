@@ -1,9 +1,9 @@
 MIT License
 
-Copyright for portions of project SimPLe are held by [Facebook, Inc. and its affiliates.] as part of project Fairseq.
-Copyright for portions of project SimPLe are held by [Stable-Baselines Team, 2018-2019] as part of project Stable Baselines.
-Copyright for portions of project SimPLe are held by [Ilya Kostrikov, 2017] as part of project pytorch-a2c-ppo-acktr.
-All other copyright for project SimPLe are held by [Thomas Schillaci, 2020].
+Copyright for portions of project SimPLe-PyTorch are held by [Facebook, Inc. and its affiliates.] as part of project Fairseq.
+Copyright for portions of project SimPLe-PyTorch are held by [Stable-Baselines Team, 2018-2019] as part of project Stable Baselines.
+Copyright for portions of project SimPLe-PyTorch are held by [Ilya Kostrikov, 2017] as part of project pytorch-a2c-ppo-acktr.
+All other copyright for project SimPLe-PyTorch are held by [Thomas Schillaci, 2020].
 
 Copyright (c) 2020 Thomas Schillaci
 

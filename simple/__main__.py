@@ -126,7 +126,6 @@ class SimPLe:
 
     def load_models(self):
         self.model.load_state_dict(torch.load(os.path.join('models', 'model.pt')))
-        self.model.reward_estimator.load_state_dict(torch.load(os.path.join('models', 'reward_model.pt')))
         self.agent = PPO(self.simulated_env, config, num_steps=self.config.rollout_length, num_mini_batch=5)
         self.agent.load(os.path.join('models', 'ppo.pt'))
 
@@ -141,8 +140,7 @@ class SimPLe:
                  'or changing the environment.')
             return self.train()
 
-        epochs = 15
-        for epoch in trange(epochs, desc='Epoch'):
+        for epoch in trange(self.config.epochs, desc='Epoch'):
             self.collect_interactions()
             self.trainer.train(epoch, self.real_env)
             self.train_agent_sim_env(epoch)
@@ -163,6 +161,7 @@ if __name__ == '__main__':
     parser.add_argument('--done-on-last-rollout-step', default=True, action='store_false')
     parser.add_argument('--dropout', type=float, default=0.15)
     parser.add_argument('--env-name', type=str, default='Freeway')
+    parser.add_argument('--epochs', type=int, default=15)
     parser.add_argument('--experiment-name', type=str, default=strftime('%d-%m-%y-%H:%M:%S'))
     parser.add_argument('--filter-double-steps', type=int, default=3)
     parser.add_argument('--frame-shape', type=int, nargs=3, default=(3, 105, 80))
