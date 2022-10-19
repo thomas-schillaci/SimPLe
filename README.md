@@ -1,6 +1,6 @@
 # SimPLe PyTorch
 
-PyTorch implementation of the *SimPLe* algorithm for the Arcade Learning Environment's Atari 2600 games.
+PyTorch implementation of *SimPLe* (Simulated Policy Learning) on the [Atari 100k benchmark](https://paperswithcode.com/sota/atari-games-100k-on-atari-100k).
 
 Based on the paper [Model-Based Reinforcement Learning for Atari](https://arxiv.org/abs/1903.00374).
 
