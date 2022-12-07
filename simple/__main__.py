@@ -113,7 +113,7 @@ class SimPLe:
             SampleWithTemperature(self.agent),
             self.config.env_name,
             self.config.device,
-            render=self.config.render_training,
+            render=self.config.render_evaluation,
             frame_shape=config.frame_shape,
             agents=15,
             noop_max=config.noop_max
